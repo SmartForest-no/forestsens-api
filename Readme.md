@@ -1,6 +1,6 @@
 # ForestSensAPI
 
-ForestSensAPI is a Python client for interacting with Smartforests ForestSens platform API utilizing the OCI SDK for efficient file uploads. It allows users to manage batch jobs, upload files, retrieve results, and monitor processing status through a simple and extensible interface.
+ForestSensAPI is a Python client for interacting with Smartforests [ForestSens](https://forestsens.com) platform API utilizing the OCI SDK for efficient file uploads. It allows users to manage batch jobs, upload files, retrieve results, and monitor processing status through a simple and extensible interface.
 
 ## 🚀 Features
 
