@@ -1,0 +1,11 @@
+LICENSE
+pyproject.toml
+setup.py
+ForestSensAPI/__init__.py
+ForestSensAPI/api.py
+forestsensapi.egg-info/PKG-INFO
+forestsensapi.egg-info/SOURCES.txt
+forestsensapi.egg-info/dependency_links.txt
+forestsensapi.egg-info/requires.txt
+forestsensapi.egg-info/top_level.txt
+tests/test_api.py
