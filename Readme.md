@@ -1,127 +1,85 @@
-# ForestSensAPI
+# forestsens
 
-ForestSensAPI is a Python client for interacting with Smartforests [ForestSens](https://forestsens.com) platform API utilizing the OCI SDK for efficient file uploads. It allows users to manage batch jobs, upload files, retrieve results, and monitor processing status through a simple and extensible interface.
+Python client for the [ForestSens](https://forestsens.com) API. **v2 -- a real rewrite, not
+compatible with anything earlier**: the platform moved off the old Oracle APEX API onto a new
+OCI-hosted one (different auth, different batch/upload shapes), so this client's entire surface
+changed to match. Earlier versions of this repo were never published as a package, so there's
+nothing to pin against -- this is effectively the first real release.
 
-Currently under development with our partners, the API will be available for public use in the near future. For questions or contributions, please contact us at [forestsens@nibio.no](mailto:forestsens@nibio.no).
+v2 deliberately covers the core workflow only: **upload a dataset, run a batch, download the
+results.** Managing API keys, browsing detections/segments/tree-inventory tables, and other
+admin-area functionality aren't included yet -- see the [ForestSens
+roadmap](https://github.com/SmartForest-no/ForestSens/blob/main/ROADMAP.md) for what's planned
+next.
 
-## 🚀 Features
+> Note: this package's import name (`forestsens`) is unrelated to the identically-named internal
+> package in the main [ForestSens platform repo](https://github.com/SmartForest-no/ForestSens) --
+> that one is never published anywhere (local install only for the backend service itself), so
+> there's no real collision, just a shared name worth knowing about.
 
-- Initialize and start batch jobs
-- Upload files to OCI Object Storage using PAR URLs
-- Retrieve and download batch results
-- Monitor batch status
-- Supports configuration via JSON and OCI config files
-
-## 📦 Installation
+## Install
 
 ```bash
-pip install -r requirements.txt
-```
-## ⚙️ Configuration
-
-### API Configuration
-
-ForestSensAPI requires a `base_url` and an `apitoken` for authentication. These can be provided directly when initializing the client, or via a configuration file.
-
-**Recommended:** Create a config file at `~/.forestsens/config.json`:
-
-```json
-{
-    "base_url": "https://forestsens.api.url",
-    "apitoken": "your_api_token"
-}
+pip install forestsens
 ```
 
-- If you do not provide `base_url` and `apitoken` directly to the client, the library will look for this file by default.
-- You can override the config file location by passing the `api_config_path` parameter.
+## Configuration
 
-### OCI Configuration (Optional, for Object Storage)
+You need a **gateway host** (where the ForestSens API lives) and an **API key** (`fs_...`) --
+mint a key via the web UI's Account page (self-service, requires a real login first; this client
+only ever *uses* an existing key, it can't create one for you).
 
-To enable file uploads to Oracle Cloud Infrastructure (OCI) Object Storage, you must provide OCI credentials. There are two ways to do this:
+Three ways to provide them, in priority order:
 
-1. **Using a config file (default):**
-   - Place your OCI config at `~/.oci/config` (standard OCI CLI format).
-   - Optionally, specify a different path with the `oci_config_path` parameter.
-   - You can also select a profile (default is `"DEFAULT"`) using the `oci_profile` parameter.
+1. **Directly to `Client()`:**
+   ```python
+   from forestsens import Client
+   client = Client(gateway_host="xxxx.apigateway.eu-frankfurt-1.oci.customer-oci.com", api_key="fs_...")
+   ```
+2. **Environment variables:**
+   ```bash
+   export FORESTSENS_GATEWAY_HOST=xxxx.apigateway.eu-frankfurt-1.oci.customer-oci.com
+   export FORESTSENS_API_KEY=fs_...
+   ```
+3. **A config file** at `~/.forestsens/config.json`:
+   ```json
+   { "gateway_host": "xxxx.apigateway.eu-frankfurt-1.oci.customer-oci.com", "api_key": "fs_..." }
+   ```
 
-2. **Using a Python dictionary:**
-   - Pass a dictionary with the required OCI credentials to the `oci_config` parameter.
-
-**Example OCI config file (`~/.oci/config`):**
-```
-[DEFAULT]
-user=ocid1.user.oc1..exampleuniqueID
-fingerprint=20:3b:97:...
-key_file=/path/to/oci_api_key.pem
-tenancy=ocid1.tenancy.oc1..exampleuniqueID
-region=eu-frankfurt-1
-```
-
-
-## 🧪 Usage Example
-
-### Initialize from Config File
+## Usage
 
 ```python
-from ForestSensAPI import ForestSensAPI
+from forestsens import Client, BatchFailedError
 
-# Initialize the API client (reads from ~/.forestsens/config.json)
-api = ForestSensAPI()
+client = Client()
+
+# Discover a pipeline to run.
+pipelines = client.list_pipelines(sense="drone")
+pipeline = pipelines[0]
+
+# Upload one or more local files -- handles small files (direct upload)
+# and large files (resumable chunked upload) the same way.
+upload_id = client.upload_files(["orthophoto.tif"])
+
+# Run a batch and wait for it to finish.
+batch = client.create_batch(pipeline["id"], [{"slot": "input", "upload_id": upload_id}])
+try:
+    batch = client.wait_for_batch(batch["id"])
+except BatchFailedError as exc:
+    print(f"Batch failed: {exc.message}")
+    raise
+
+# Download whatever artifacts the batch produced.
+paths = client.download_artifacts(batch["id"], dest_dir="downloads")
 ```
 
-### Initialize with Config Passed Directly
+See [`examples/example_batch.py`](examples/example_batch.py) for the full runnable version, and
+[`docs/forestsens_api_reference.md`](docs/forestsens_api_reference.md) for the underlying REST API
+this client wraps.
 
-```python
-from ForestSensAPI import ForestSensAPI
+## Development
 
-# Initialize with API credentials passed directly
-api = ForestSensAPI(
-    base_url="https://forestsens.api.url",
-    apitoken="your_api_token"
-)
+```bash
+pip install -e ".[dev]"
+pytest -q
 ```
-
-### Initialize with OCI Configuration
-
-```python
-from ForestSensAPI import ForestSensAPI
-
-# Initialize with API and OCI credentials
-api = ForestSensAPI(
-    base_url="https://forestsens.api.url",
-    apitoken="your_api_token",
-    oci_config_path="~/.oci/config",        # or omit to use default
-    oci_profile="DEFAULT"                    # or specify a different profile
-)
-
-# Or, pass OCI config as a dictionary
-oci_config = {
-    "user": "ocid1.user.oc1..exampleuniqueID",
-    "fingerprint": "20:3b:97:...",
-    "key_file": "/path/to/oci_api_key.pem",
-    "tenancy": "ocid1.tenancy.oc1..exampleuniqueID",
-    "region": "eu-frankfurt-1"
-}
-
-api = ForestSensAPI(
-    base_url="https://forestsens.api.url",
-    apitoken="your_api_token",
-    oci_config=oci_config
-)
-```
-
-### Run a Batch
-
-```python
-# Run a batch
-batch = api.run_batch(
-    algorithm=26,
-    input_path="path/to/data",
-    name="MyBatch"
-)
-print(batch["status"])
-
-# Download results
-api.download_results(batch_id=batch["id"], output_dir="results")
-```
-

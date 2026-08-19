@@ -1,4 +1,0 @@
-
-oci
-requests
-tqdm
