@@ -1,67 +1,48 @@
-import os
-import json
-from ForestSensAPI import ForestSensAPI
+"""End-to-end example: upload a file, discover a pipeline, run a batch,
+wait for it, download whatever artifacts it produces.
 
-# ----------------------------
-# Configuration
-# ----------------------------
-#INPUT_PATH = "data/input.tif"      # Path to your input file
-INPUT_PATH = None                   # Path to your input file
-ALGORITHM_ID = 26                   # Algorithm ID to use
-BATCH_NAME = "Test Batch"           # Name of the batch
-DOWNLOAD_RESULTS = False            # Set to True to download results
+Requires a real API key -- mint one via the ForestSens web UI's Account
+page, then either export FORESTSENS_GATEWAY_HOST/FORESTSENS_API_KEY or
+write them to ~/.forestsens/config.json (see Readme.md).
+"""
 
-# ----------------------------
-# Initialize API
-# ----------------------------
-api = ForestSensAPI()
+from forestsens import BatchFailedError, Client
 
-# ----------------------------
-# Run a batch
-# ----------------------------
-if INPUT_PATH and ALGORITHM_ID:
-    print(f"Running batch with algorithm {ALGORITHM_ID} on {INPUT_PATH}")
-    api.run_batch(input_path=INPUT_PATH, algorithm=ALGORITHM_ID, name=BATCH_NAME)
+INPUT_PATH = "path/to/your/file.tif"  # a real local file
+SENSE = "drone"  # or "point" -- see client.list_pipelines(sense=...)
 
-# ----------------------------
-# Get latest batches
-# ----------------------------
-batch_list = api.get_all_batches(3)
+client = Client()
 
-print("\nLatest batches:")
-print(json.dumps(batch_list, indent=2))
+print("Available pipelines:")
+pipelines = client.list_pipelines(sense=SENSE)
+for p in pipelines:
+    print(f"  {p['id']}  {p['name']}")
+if not pipelines:
+    raise SystemExit(f"No pipelines found for sense={SENSE!r} -- nothing to run.")
+pipeline = pipelines[0]
 
-# ----------------------------
-# Get last batch
-# ----------------------------
-batch_list = api.get_all_batches(3)
-if not batch_list:
-    print("No batches found.")
-else:
-    latest_batch = batch_list[0]
-    batch_id = latest_batch['batch_id']
+print(f"\nUploading {INPUT_PATH}...")
+upload_id = client.upload_files([INPUT_PATH])
+print(f"Upload complete: {upload_id}")
 
-    print("\nLast batch info:")
-    print(json.dumps(latest_batch, indent=2))
+print(f"\nStarting batch against pipeline {pipeline['id']} ({pipeline['name']})...")
+# A pipeline's graph (pipeline["graph"]) encodes its expected input slot
+# names -- "input" is a common default but isn't guaranteed for every
+# pipeline. Check pipeline["graph"] if this raises a validation error.
+batch = client.create_batch(pipeline["id"], [{"slot": "input", "upload_id": upload_id}])
+print(f"Batch created: {batch['id']} (status={batch['status']})")
 
-    # ----------------------------
-    # Get batch status
-    # ----------------------------
-    status = api.get_batch_status(batch_id)
-    print("\nBatch status:")
-    print(json.dumps(status, indent=2))
+print("\nWaiting for batch to finish...")
+try:
+    batch = client.wait_for_batch(batch["id"], poll_interval=5)
+except BatchFailedError as exc:
+    print(f"Batch failed: {exc.message}")
+    for step in exc.batch.get("steps") or []:
+        if step.get("error"):
+            print(f"  step {step['node_id']}: {step['error']}")
+    raise SystemExit(1)
 
-    # ----------------------------
-    # Get results
-    # ----------------------------
-    results = api.get_results(batch_id=batch_id)
-    print("\nResults for last batch (batch_id="+str(batch_id)+"):")
-    print(json.dumps(results, indent=2))
-
-    # ----------------------------
-    # Download results
-    # ----------------------------
-    if DOWNLOAD_RESULTS:
-        print(f"\nDownloading results to 'downloads/'...")
-        api.download_results(batch_id=batch_id, output_dir="downloads")
-        print("Download complete.")
+print("Batch done. Downloading artifacts...")
+paths = client.download_artifacts(batch["id"], dest_dir="downloads")
+for path in paths:
+    print(f"  {path}")
