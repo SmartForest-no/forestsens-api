@@ -2,8 +2,8 @@
 
 This describes the real REST endpoints the `forestsens` package wraps -- the subset needed for
 upload/batch/download. It is not the full ForestSens API (which also covers tenant/API-key
-administration, typed result tables, and more); see the main
-[ForestSens repo](https://github.com/SmartForest-no/ForestSens) if you need the complete surface.
+administration, typed result tables, and more) -- see the [Readme](../Readme.md)'s "Full API
+reference" section for the complete, always-current OpenAPI spec.
 
 Every response is wrapped in an envelope: `{"data": ..., "meta": {...}, "error": null | {"code",
 "message", "details"}}`. This client raises `forestsens.ForestSensAPIError` whenever `error` is
@@ -12,8 +12,8 @@ non-null.
 ## Authentication
 
 All requests carry `X-Api-Key: fs_...` and go through the dedicated `/v1-key/{path*}` route (not
-`/v1/{path*}`, which requires a browser-issued JWT this client never has). An API key can only be
-minted via the web UI's self-service Account page.
+`/v1/{path*}`, which requires a browser-issued JWT this client never has). An API key is issued by a ForestSens administrator -- see the
+[Readme](../Readme.md)'s "Getting an API key" section.
 
 ## `GET /v1/pipelines?sense=<sense_code>`
 

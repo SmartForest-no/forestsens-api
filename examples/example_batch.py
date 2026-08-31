@@ -1,9 +1,10 @@
 """End-to-end example: upload a file, discover a pipeline, run a batch,
 wait for it, download whatever artifacts it produces.
 
-Requires a real API key -- mint one via the ForestSens web UI's Account
-page, then either export FORESTSENS_GATEWAY_HOST/FORESTSENS_API_KEY or
-write them to ~/.forestsens/config.json (see Readme.md).
+Requires a real API key -- ask a ForestSens administrator to issue one
+(see Readme.md's "Getting an API key" section), then either export
+FORESTSENS_GATEWAY_HOST/FORESTSENS_API_KEY or write them to
+~/.forestsens/config.json (see Readme.md).
 """
 
 from forestsens import BatchFailedError, Client
