@@ -25,14 +25,23 @@ than pin a release.)
 
 ## Getting an API key
 
-An API key (`fs_...`) is what authenticates every call this client makes. You can't mint one
-yourself from a blank slate -- ask a **ForestSens administrator** in your organization to issue
-one for you. If you *are* that administrator, issuing a key (for yourself or for whoever needs
-one) is a single authenticated REST call:
+An API key (`fs_...`) is what authenticates every call this client makes -- it's a long-lived
+ForestSens-native credential (never expires on its own, only revocation ends it), unrelated to
+the short-lived OIDC access tokens the web app's own browser login uses internally. You can't
+mint one yourself from a blank slate -- ask a **ForestSens administrator** in your organization
+to issue one for you.
+
+If you *are* that administrator, the normal way is the ForestSens web app itself: log in, open
+the Tenant Admin page, click **Manage** on the relevant member's row, then **Issue key**. No
+tokens, no `curl` -- the UI does the call for you.
+
+If you want to automate issuing keys (e.g. as part of your own onboarding pipeline), the
+simplest way is to reuse **your own existing personal API key** rather than deal with OAuth at
+all -- the same endpoint accepts either an admin's bearer token *or* an admin's own `X-Api-Key`:
 
 ```bash
 curl -X POST "https://<gateway-host>/v1/principals/<principal-id-of-the-key's-future-owner>/api-keys" \
-  -H "Authorization: Bearer <your-own-admin-access-token>" \
+  -H "X-Api-Key: <your-own-admin-api-key>" \
   -H "Content-Type: application/json" \
   -d '{"name": "my external client"}'
 ```
