@@ -1,3 +1,8 @@
+> **Not yet active.** This README (and the `v2.0.0` tag) describe a client for ForestSens' new,
+> OCI-hosted API, which is not yet the production system. If you're integrating with ForestSens
+> today, use the [`v1.0.0` release](https://github.com/SmartForest-no/forestsens-api/releases/tag/v1.0.0)
+> instead -- the client for the current, active Oracle APEX-based system.
+
 # forestsens
 
 A Python client for the [ForestSens](https://forestsens.com) API -- a forestry data-processing
