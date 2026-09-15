@@ -170,16 +170,23 @@ def test_create_batch_posts_pipeline_and_inputs():
     assert sent_json == {"pipeline_id": "pipeline-1", "inputs": [{"slot": "input", "upload_id": "upload-1"}]}
 
 
-def test_wait_for_batch_polls_until_done():
+def test_wait_for_batch_polls_until_complete():
+    """Real bug, found 2026-09-15: this test's own mock used to fabricate
+    "done" as the terminal status -- a value the real API never actually
+    returns (Batch.status is only ever "queued"/"running"/"complete"/
+    "failed") -- so it validated a status this API doesn't produce, not
+    the real contract, and passed while wait_for_batch was completely
+    broken for real use.
+    """
     client = make_client()
     with patch("requests.Session.request") as mock_request, patch("time.sleep") as mock_sleep:
         mock_request.side_effect = [
             envelope_response(data={"id": "batch-1", "status": "running"}),
             envelope_response(data={"id": "batch-1", "status": "running"}),
-            envelope_response(data={"id": "batch-1", "status": "done"}),
+            envelope_response(data={"id": "batch-1", "status": "complete"}),
         ]
         batch = client.wait_for_batch("batch-1", poll_interval=0.01)
-    assert batch["status"] == "done"
+    assert batch["status"] == "complete"
     assert mock_sleep.call_count == 2
 
 

@@ -139,10 +139,10 @@ call.
 ## Full API reference
 
 This client wraps a subset of the real ForestSens REST API -- upload, batch, and artifact
-download. The complete, always-current API surface is published as an OpenAPI document:
-
-- **Interactive docs**: https://mvym2zsszqqwnjdr6ypbzgq7yq.apigateway.eu-frankfurt-1.oci.customer-oci.com/docs
-- **Raw OpenAPI spec**: https://mvym2zsszqqwnjdr6ypbzgq7yq.apigateway.eu-frankfurt-1.oci.customer-oci.com/openapi.json
+download. Interactive docs aren't publicly exposed on this deployment (a deliberate choice, not
+an oversight -- the full route/parameter surface, including the operator-only area, isn't meant
+to be publicly browsable); ask a ForestSens administrator for the current API reference if you
+need the complete schema.
 
 This client deliberately doesn't cover the whole surface yet -- API-key management and browsing
 typed result tables (detections, segments, tree inventory) aren't included. You can always reach
