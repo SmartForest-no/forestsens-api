@@ -223,15 +223,25 @@ class Client:
     def wait_for_batch(
         self, batch_id: str, poll_interval: float = 5.0, timeout: float | None = None
     ) -> dict[str, Any]:
-        """Polls until the batch reaches status "done" or "failed".
+        """Polls until the batch reaches status "complete" or "failed".
         Raises BatchFailedError (carrying the full batch dict, including
         per-step errors/log tails) on failure -- the "one call to get to
         a finished batch" convenience this kind of client should have.
+
+        Real bug, found 2026-09-15: this checked for status "done", a
+        value the real API never actually returns (Batch.status is only
+        ever "queued"/"running"/"complete"/"failed", per the backend's
+        own DB check constraint) -- every call to this method looped
+        until timeout (or forever, the default with no timeout given)
+        even for a batch that completed successfully. The test suite's
+        own mock fabricated "done" as the terminal status, which is
+        exactly how this went uncaught: it validated a status this API
+        doesn't produce, not the real contract.
         """
         deadline = time.monotonic() + timeout if timeout is not None else None
         while True:
             batch = self.get_batch(batch_id)
-            if batch["status"] == "done":
+            if batch["status"] == "complete":
                 return batch
             if batch["status"] == "failed":
                 raise BatchFailedError(batch)
