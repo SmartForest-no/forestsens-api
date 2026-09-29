@@ -10,16 +10,16 @@ FORESTSENS_GATEWAY_HOST/FORESTSENS_API_KEY or write them to
 from forestsens import BatchFailedError, Client
 
 INPUT_PATH = "path/to/your/file.tif"  # a real local file
-SENSE = "drone"  # or "point" -- see client.list_pipelines(sense=...)
+SENS = "drone"  # or "point" -- see client.list_pipelines(sens=...)
 
 client = Client()
 
 print("Available pipelines:")
-pipelines = client.list_pipelines(sense=SENSE)
+pipelines = client.list_pipelines(sens=SENS)
 for p in pipelines:
     print(f"  {p['id']}  {p['name']}")
 if not pipelines:
-    raise SystemExit(f"No pipelines found for sense={SENSE!r} -- nothing to run.")
+    raise SystemExit(f"No pipelines found for sens={SENS!r} -- nothing to run.")
 pipeline = pipelines[0]
 
 print(f"\nUploading {INPUT_PATH}...")

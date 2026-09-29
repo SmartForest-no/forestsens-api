@@ -204,8 +204,8 @@ class Client:
 
     # -- pipelines ------------------------------------------------------------
 
-    def list_pipelines(self, sense: str | None = None) -> list[dict[str, Any]]:
-        params = {"sense": sense} if sense else None
+    def list_pipelines(self, sens: str | None = None) -> list[dict[str, Any]]:
+        params = {"sens": sens} if sens else None
         return self._get("/v1/pipelines", params=params)
 
     # -- batches ------------------------------------------------------------
