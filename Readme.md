@@ -89,7 +89,7 @@ client = Client()
 
 # Discover a pipeline to run. Each has an id, a name, and a graph describing
 # its expected input slot names.
-pipelines = client.list_pipelines(sense="drone")  # or "point" for LiDAR pipelines
+pipelines = client.list_pipelines(sens="drone")  # or "point" for LiDAR pipelines
 pipeline = pipelines[0]
 
 # Upload one or more local files. Small files upload directly; large files
@@ -119,7 +119,7 @@ See [`examples/example_batch.py`](examples/example_batch.py) for the full runnab
 
 | Method | Returns | Does |
 |---|---|---|
-| `list_pipelines(sense=None)` | `list[dict]` | Lists available pipelines, optionally filtered by sense (`"drone"`, `"point"`, ...). |
+| `list_pipelines(sens=None)` | `list[dict]` | Lists available pipelines, optionally filtered by sens (`"drone"`, `"point"`, ...). |
 | `upload_files(paths, name=None)` | `str` (upload id) | Uploads one or more local files as a single dataset. |
 | `create_batch(pipeline_id, inputs)` | `dict` (batch) | Starts a pipeline run. `inputs` is `[{"slot": str, "upload_id": str}, ...]`. |
 | `get_batch(batch_id)` | `dict` (batch) | Fetches a batch's current status/detail. |

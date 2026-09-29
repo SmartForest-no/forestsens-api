@@ -15,7 +15,7 @@ All requests carry `X-Api-Key: fs_...` and go through the dedicated `/v1-key/{pa
 `/v1/{path*}`, which requires a browser-issued JWT this client never has). An API key is issued by a ForestSens administrator -- see the
 [Readme](../Readme.md)'s "Getting an API key" section.
 
-## `GET /v1/pipelines?sense=<sense_code>`
+## `GET /v1/pipelines?sens=<sens_code>`
 
 Lists available pipelines. Each has an `id` (pass to `POST /v1/batches` as `pipeline_id`), a
 `name`, and a `graph` describing its expected input slots.
