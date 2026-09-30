@@ -9,33 +9,28 @@ FORESTSENS_GATEWAY_HOST/FORESTSENS_API_KEY or write them to
 
 from forestsens import BatchFailedError, Client
 
-INPUT_PATH = "path/to/your/file.tif"  # a real local file
-SENS = "drone"  # or "point" -- see client.list_pipelines(sens=...)
+INPUT_PATH = "path/to/your/file.tif"  # a real local file, or a folder of them
+PIPELINE_NAME = "Orthophoto (fast)"  # see client.list_pipelines() for the full catalog
 
 client = Client()
 
-print("Available pipelines:")
-pipelines = client.list_pipelines(sens=SENS)
-for p in pipelines:
-    print(f"  {p['id']}  {p['name']}")
-if not pipelines:
-    raise SystemExit(f"No pipelines found for sens={SENS!r} -- nothing to run.")
-pipeline = pipelines[0]
+# --- The step-by-step version -- what run() below does under the hood, useful when you
+# need more than one input slot or want to inspect/act on the batch mid-flight (e.g. cancel it).
+
+pipeline = client.find_pipeline(PIPELINE_NAME)
+print(f"Using pipeline: {pipeline}")  # Pipeline's friendly repr -- just id/name, not the full graph
 
 print(f"\nUploading {INPUT_PATH}...")
-upload_id = client.upload_files([INPUT_PATH])
+upload_id = client.upload_files(INPUT_PATH)
 print(f"Upload complete: {upload_id}")
 
-print(f"\nStarting batch against pipeline {pipeline['id']} ({pipeline['name']})...")
-# A pipeline's graph (pipeline["graph"]) encodes its expected input slot
-# names -- "input" is a common default but isn't guaranteed for every
-# pipeline. Check pipeline["graph"] if this raises a validation error.
-batch = client.create_batch(pipeline["id"], [{"slot": "input", "upload_id": upload_id}])
-print(f"Batch created: {batch['id']} (status={batch['status']})")
+print(f"\nStarting batch against {pipeline}...")
+batch = client.create_batch(pipeline.id, [{"slot": "input", "upload_id": upload_id}])
+print(f"Batch created: {batch}")  # Batch's friendly repr -- id + status
 
 print("\nWaiting for batch to finish...")
 try:
-    batch = client.wait_for_batch(batch["id"], poll_interval=5)
+    batch = client.wait_for_batch(batch.id, poll_interval=5, on_progress=print)
 except BatchFailedError as exc:
     print(f"Batch failed: {exc.message}")
     for step in exc.batch.get("steps") or []:
@@ -44,6 +39,11 @@ except BatchFailedError as exc:
     raise SystemExit(1)
 
 print("Batch done. Downloading artifacts...")
-paths = client.download_artifacts(batch["id"], dest_dir="downloads")
+paths = client.download_artifacts(batch.id, dest_dir="downloads")
 for path in paths:
     print(f"  {path}")
+
+# --- The one-call shortcut -- the whole block above, in one line:
+#
+#   pipeline = client.find_pipeline(PIPELINE_NAME)
+#   paths = client.run(pipeline, INPUT_PATH, dest_dir="downloads", on_progress=print)

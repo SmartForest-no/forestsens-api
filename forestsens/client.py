@@ -39,6 +39,48 @@ def _load_config_file(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
+class Pipeline(dict):
+    """list_pipelines()/find_pipeline() wrap each raw pipeline dict in this so printing/repr-ing
+    one (or a list of them) shows just id/name -- not the internal graph/tenant_id/sens_id/
+    created_at noise a researcher never needs to pick a pipeline by name -- while staying a real
+    dict throughout: pipeline["id"], **pipeline, json.dumps(pipeline), and every existing
+    dict-based caller keep working unchanged. Attribute access (.id/.name/.description) is added
+    on top as a nicer alternative to bracket indexing, not a replacement.
+    """
+
+    def __getattr__(self, key: str) -> Any:
+        try:
+            return self[key]
+        except KeyError as exc:
+            raise AttributeError(key) from exc
+
+    def __repr__(self) -> str:
+        return f"Pipeline(id={self.get('id')!r}, name={self.get('name')!r})"
+
+    def __str__(self) -> str:
+        return self.get("name") or str(self.get("id"))
+
+
+class Batch(dict):
+    """Same treatment as Pipeline, for batches -- create_batch/get_batch/wait_for_batch return
+    this instead of a bare dict. Still a real dict throughout (batch["status"], json.dumps(batch),
+    ** unpacking all keep working); adds .id/.status attribute access and a repr/str that shows
+    what actually matters at a glance instead of the full steps/results dump.
+    """
+
+    def __getattr__(self, key: str) -> Any:
+        try:
+            return self[key]
+        except KeyError as exc:
+            raise AttributeError(key) from exc
+
+    def __repr__(self) -> str:
+        return f"Batch(id={self.get('id')!r}, status={self.get('status')!r})"
+
+    def __str__(self) -> str:
+        return f"{self.get('id')} ({self.get('status')})"
+
+
 class Client:
     def __init__(
         self,
@@ -109,15 +151,22 @@ class Client:
 
     # -- uploads ------------------------------------------------------------
 
-    def upload_files(self, paths: list[str | os.PathLike[str]], name: str | None = None) -> str:
+    def upload_files(
+        self,
+        paths: str | os.PathLike[str] | list[str | os.PathLike[str]],
+        name: str | None = None,
+    ) -> str:
         """Creates a dataset from one or more local files and returns its
         upload_id. Sequential per file, on purpose -- simpler than the
         frontend's bounded-concurrency pool; a script-driven client
         doesn't need the same UX polish a browser progress bar does.
         Each file (or, for a large file, each chunk) is retried up to
         MAX_ATTEMPTS times with a short backoff before giving up.
+
+        `paths` can be a single file, a single folder (its top-level files
+        are uploaded, see _resolve_paths), or a list mixing either.
         """
-        paths = [Path(p) for p in paths]
+        paths = self._resolve_paths(paths)
         created = self._post(
             "/v1/uploads",
             {
@@ -141,6 +190,32 @@ class Client:
 
         self._post(f"/v1/uploads/{upload_id}/complete", {})
         return upload_id
+
+    def _resolve_paths(
+        self, paths: str | os.PathLike[str] | list[str | os.PathLike[str]]
+    ) -> list[Path]:
+        """A single string/PathLike is treated as one path, not iterated
+        character-by-character -- a real footgun the old list-only
+        signature had if you passed a bare path instead of wrapping it in
+        a list. Any directory among the given paths is expanded to its
+        top-level files -- not recursive, deliberately: a folder with an
+        unrelated nested subfolder (e.g. "processed/") shouldn't silently
+        get swept in too. Hidden files (dotfiles) are skipped.
+        """
+        if isinstance(paths, (str, os.PathLike)):
+            paths = [paths]
+        resolved: list[Path] = []
+        for p in paths:
+            p = Path(p)
+            if p.is_dir():
+                resolved.extend(
+                    sorted(f for f in p.iterdir() if f.is_file() and not f.name.startswith("."))
+                )
+            else:
+                resolved.append(p)
+        if not resolved:
+            raise ValueError(f"no files found in {paths!r}")
+        return resolved
 
     def _with_retry(self, attempt_fn: Callable[[], None]) -> None:
         last_err: Exception | None = None
@@ -204,29 +279,57 @@ class Client:
 
     # -- pipelines ------------------------------------------------------------
 
-    def list_pipelines(self, sens: str | None = None) -> list[dict[str, Any]]:
+    def list_pipelines(self, sens: str | None = None) -> list[Pipeline]:
         params = {"sens": sens} if sens else None
-        return self._get("/v1/pipelines", params=params)
+        return [Pipeline(d) for d in self._get("/v1/pipelines", params=params)]
+
+    def find_pipeline(self, name: str, sens: str | None = None) -> Pipeline:
+        """The common case once you already know what you want to run
+        (e.g. copied off the web UI) -- clearer than filtering
+        list_pipelines() and indexing [0] yourself, and fails with the
+        real available names instead of a bare IndexError if the name's
+        wrong.
+        """
+        pipelines = self.list_pipelines(sens=sens)
+        matches = [p for p in pipelines if p.get("name") == name]
+        if not matches:
+            available = (
+                ", ".join(sorted({p.get("name") or str(p.get("id")) for p in pipelines}))
+                or "(none)"
+            )
+            raise LookupError(f"no pipeline named {name!r} -- available: {available}")
+        if len(matches) > 1:
+            raise LookupError(f"multiple pipelines named {name!r} -- pass sens= to disambiguate")
+        return matches[0]
 
     # -- batches ------------------------------------------------------------
 
-    def create_batch(self, pipeline_id: str, inputs: list[dict[str, Any]]) -> dict[str, Any]:
+    def create_batch(self, pipeline_id: str, inputs: list[dict[str, Any]]) -> Batch:
         """inputs: [{"slot": str, "upload_id": str}, ...] -- see
         list_pipelines()'s returned graph for a given pipeline's expected
         slot names.
         """
-        return self._post("/v1/batches", {"pipeline_id": pipeline_id, "inputs": inputs})
+        return Batch(self._post("/v1/batches", {"pipeline_id": pipeline_id, "inputs": inputs}))
 
-    def get_batch(self, batch_id: str) -> dict[str, Any]:
-        return self._get(f"/v1/batches/{batch_id}")
+    def get_batch(self, batch_id: str) -> Batch:
+        return Batch(self._get(f"/v1/batches/{batch_id}"))
 
     def wait_for_batch(
-        self, batch_id: str, poll_interval: float = 5.0, timeout: float | None = None
-    ) -> dict[str, Any]:
+        self,
+        batch_id: str,
+        poll_interval: float = 5.0,
+        timeout: float | None = None,
+        on_progress: Callable[[Batch], None] | None = None,
+    ) -> Batch:
         """Polls until the batch reaches status "complete" or "failed".
         Raises BatchFailedError (carrying the full batch dict, including
         per-step errors/log tails) on failure -- the "one call to get to
         a finished batch" convenience this kind of client should have.
+
+        `on_progress`, if given, is called once each time the batch's
+        status changes (e.g. "queued" -> "running" -> "complete"), not on
+        every poll -- pass on_progress=print for a one-line progress log
+        on an otherwise-silent long GPU job.
 
         Real bug, found 2026-09-15: this checked for status "done", a
         value the real API never actually returns (Batch.status is only
@@ -239,8 +342,12 @@ class Client:
         doesn't produce, not the real contract.
         """
         deadline = time.monotonic() + timeout if timeout is not None else None
+        last_status = None
         while True:
             batch = self.get_batch(batch_id)
+            if on_progress is not None and batch["status"] != last_status:
+                on_progress(batch)
+                last_status = batch["status"]
             if batch["status"] == "complete":
                 return batch
             if batch["status"] == "failed":
@@ -248,6 +355,37 @@ class Client:
             if deadline is not None and time.monotonic() >= deadline:
                 raise TimeoutError(f"batch {batch_id} did not finish within {timeout}s")
             time.sleep(poll_interval)
+
+    def run(
+        self,
+        pipeline: str | dict[str, Any],
+        paths: str | os.PathLike[str] | list[str | os.PathLike[str]],
+        dest_dir: str | os.PathLike[str],
+        *,
+        slot: str = "input",
+        name: str | None = None,
+        poll_interval: float = 5.0,
+        timeout: float | None = None,
+        on_progress: Callable[[Batch], None] | None = None,
+    ) -> list[str]:
+        """Upload -> start a batch -> wait -> download, for the common
+        single-input case -- collapses the whole upload/create_batch/
+        wait_for_batch/download_artifacts sequence into one call. Accepts
+        a Pipeline (from list_pipelines()/find_pipeline()) or a bare
+        pipeline id string.
+
+        Needing more than one input slot, or wanting to inspect/act on
+        the batch mid-flight (e.g. cancel it)? Use create_batch/
+        wait_for_batch/download_artifacts directly instead -- this is a
+        shortcut for the common case, not a replacement for them.
+        """
+        pipeline_id = pipeline["id"] if isinstance(pipeline, dict) else pipeline
+        upload_id = self.upload_files(paths, name=name)
+        batch = self.create_batch(pipeline_id, [{"slot": slot, "upload_id": upload_id}])
+        batch = self.wait_for_batch(
+            batch["id"], poll_interval=poll_interval, timeout=timeout, on_progress=on_progress
+        )
+        return self.download_artifacts(batch["id"], dest_dir)
 
     # -- downloads ------------------------------------------------------------
 
