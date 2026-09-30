@@ -49,8 +49,8 @@ Returns a batch record with `status: "queued"`.
 
 ## `GET /v1/batches/{batch_id}`
 
-Poll this for status (`queued` -> `running` -> `done`|`failed`), per-step detail (`steps[]`, each
-with `status`/`error`/`log_tail`), and a `results` summary of what's available once done.
+Poll this for status (`queued` -> `running` -> `complete`|`failed`), per-step detail (`steps[]`,
+each with `status`/`error`/`log_tail`), and a `results` summary of what's available once complete.
 
 ## `GET /v1/batches/{batch_id}/artifacts?cursor=`
 
