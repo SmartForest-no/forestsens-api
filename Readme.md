@@ -1,4 +1,4 @@
-> **Not yet active.** This README (and the `v2.0.0` tag) describe a client for ForestSens' new,
+> **Not yet active.** This README (and the `v2.1.0` tag) describe a client for ForestSens' new,
 > OCI-hosted API, which is not yet the production system. If you're integrating with ForestSens
 > today, use the [`v1.0.0` release](https://github.com/SmartForest-no/forestsens-api/releases/tag/v1.0.0)
 > instead -- the client for the current, active Oracle APEX-based system.
@@ -16,7 +16,7 @@ structured reference built for that instead of this narrative README.
 ## Install
 
 ```bash
-pip install git+https://github.com/SmartForest-no/forestsens-api.git@v2.0.0
+pip install git+https://github.com/SmartForest-no/forestsens-api.git@v2.1.0
 ```
 
 (Or `@main` for the latest commit on the default branch, if you want to track development rather
