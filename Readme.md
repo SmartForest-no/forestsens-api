@@ -75,23 +75,13 @@ client, and handle errors.
 ## Getting an API key
 
 An API key (`fs_...`) is what authenticates every call this client makes -- a long-lived
-credential that only ends when revoked. You can't mint one yourself from a blank slate: ask a
-**ForestSens administrator** in your organization to issue one for you.
+credential that only ends when revoked. Generate one yourself from your **Account** page in the
+ForestSens web app. A **ForestSens administrator** can also issue one for you, if you'd rather ask
+than self-service.
 
-<details>
-<summary>Admins: issuing a key by API instead of the UI</summary>
-
-```bash
-curl -X POST "https://mvym2zsszqqwnjdr6ypbzgq7yq.apigateway.eu-frankfurt-1.oci.customer-oci.com/v1/principals/<principal-id-of-the-key's-future-owner>/api-keys" \
-  -H "X-Api-Key: <your-own-admin-api-key>" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my external client"}'
-```
-
-The response's `data.key` is shown **exactly once** -- save it immediately; there's no way to
-retrieve it again later (only its prefix, for identification, stays visible afterward). If it's
-ever lost or compromised, revoke it and issue a new one.
-</details>
+The key is shown **exactly once** at creation -- save it immediately; there's no way to retrieve
+it again later (only its prefix, for identification, stays visible afterward). If it's ever lost or
+compromised, revoke it and issue a new one.
 
 ## Configuration
 

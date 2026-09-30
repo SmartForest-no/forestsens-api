@@ -1,7 +1,7 @@
 """End-to-end example: upload a file, discover a pipeline, run a batch,
 wait for it, download whatever artifacts it produces.
 
-Requires a real API key -- ask a ForestSens administrator to issue one
+Requires a real API key -- generate one from your Account page in the ForestSens web app
 (see Readme.md's "Getting an API key" section), then either export
 FORESTSENS_GATEWAY_HOST/FORESTSENS_API_KEY or write them to
 ~/.forestsens/config.json (see Readme.md).

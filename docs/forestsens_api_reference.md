@@ -12,7 +12,8 @@ non-null.
 ## Authentication
 
 All requests carry `X-Api-Key: fs_...` and go through the dedicated `/v1-key/{path*}` route (not
-`/v1/{path*}`, which requires a browser-issued JWT this client never has). An API key is issued by a ForestSens administrator -- see the
+`/v1/{path*}`, which requires a browser-issued JWT this client never has). A user generates their
+own API key from their Account page, or a ForestSens administrator issues one for them -- see the
 [Readme](../Readme.md)'s "Getting an API key" section.
 
 ## `GET /v1/pipelines?sens=<sens_code>`
