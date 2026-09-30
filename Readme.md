@@ -10,6 +10,9 @@ service. You upload a dataset (drone imagery, LiDAR point clouds), run it throug
 pipeline (orthomosaic generation, tree detection, segmentation, wheel-rut assessment, and more),
 and retrieve the results.
 
+Using an AI coding agent to write your integration? See [`llms.txt`](llms.txt) -- a terse,
+structured reference built for that instead of this narrative README.
+
 ## Install
 
 ```bash
@@ -64,7 +67,10 @@ inspect or act on the batch mid-flight (cancel it, check intermediate step statu
 </details>
 
 See [`examples/example_batch.py`](examples/example_batch.py) for a full runnable version of both
-forms, and the sections below for how to get a key, configure the client, and handle errors.
+forms. Three more worked examples -- a whole folder of drone photos, a LiDAR/point-cloud pipeline,
+and production-grade progress/error handling -- are indexed in
+[`docs/examples.md`](docs/examples.md). The sections below cover how to get a key, configure the
+client, and handle errors.
 
 ## Getting an API key
 

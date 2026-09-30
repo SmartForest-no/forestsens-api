@@ -1,0 +1,118 @@
+# forestsens-api -- LLM reference
+
+Python client for the ForestSens forestry data-processing API. Upload drone imagery or LiDAR
+point clouds, run a processing pipeline (orthomosaic, tree detection, segmentation, wheel-rut
+assessment, ...), download the results.
+
+Install: `pip install git+https://github.com/SmartForest-no/forestsens-api.git@v2.0.0`
+
+Requires a ForestSens API key (`fs_...`), issued by a ForestSens administrator. This client never
+creates one -- it only consumes an existing key.
+
+## Setup
+
+```python
+from forestsens import Client
+
+client = Client(gateway_host="...", api_key="fs_...")          # explicit
+client = Client()                                               # or: FORESTSENS_GATEWAY_HOST / FORESTSENS_API_KEY env vars
+client = Client(config_path="~/.forestsens/config.json")        # or: {"gateway_host": "...", "api_key": "..."} JSON file
+```
+
+## Client methods (full signatures)
+
+```python
+Client.list_pipelines(sens: str | None = None) -> list[Pipeline]
+Client.find_pipeline(name: str, sens: str | None = None) -> Pipeline
+    # Raises LookupError if no match, or more than one match.
+
+Client.upload_files(
+    paths: str | os.PathLike | list[str | os.PathLike],
+    name: str | None = None,
+) -> str  # returns upload_id
+    # paths: one file, one folder (its top-level files only, NOT recursive, dotfiles skipped),
+    # or a list mixing either. Large files (>=16 MiB) are chunked/resumed automatically.
+
+Client.create_batch(pipeline_id: str, inputs: list[dict]) -> Batch
+    # inputs: [{"slot": "input", "upload_id": upload_id}]
+
+Client.get_batch(batch_id: str) -> Batch
+
+Client.wait_for_batch(
+    batch_id: str,
+    poll_interval: float = 5.0,
+    timeout: float | None = None,
+    on_progress: Callable[[Batch], None] | None = None,
+) -> Batch
+    # Polls until status == "complete" (returns) or "failed" (raises BatchFailedError).
+    # on_progress is called once per status change, e.g. on_progress=print.
+    # Raises TimeoutError if timeout is set and exceeded.
+
+Client.run(
+    pipeline: str | dict,          # a Pipeline, or a bare pipeline id string
+    paths: str | os.PathLike | list[str | os.PathLike],
+    dest_dir: str | os.PathLike,
+    *,
+    slot: str = "input",
+    name: str | None = None,
+    poll_interval: float = 5.0,
+    timeout: float | None = None,
+    on_progress: Callable[[Batch], None] | None = None,
+) -> list[str]  # local file paths downloaded
+    # Shortcut = upload_files() + create_batch() + wait_for_batch() + download_artifacts()
+    # in one call, for the common single-input-slot case.
+
+Client.download_artifacts(batch_id: str, dest_dir: str | os.PathLike) -> list[str]
+```
+
+## Pipeline and Batch objects
+
+`Pipeline` and `Batch` are real `dict` subclasses -- every key is available both ways:
+```python
+pipeline["id"] == pipeline.id
+pipeline["name"] == pipeline.name
+batch["status"] == batch.status
+batch["id"] == batch.id
+```
+`Pipeline` fields: `id`, `name`, `description`, `graph` (internal node chain, not needed for normal
+use), `tenant_id`, `sens_id`, `created_at`.
+`Batch` fields: `id`, `status` (`"queued"` | `"running"` | `"complete"` | `"failed"`), `steps`
+(list of `{id, node_id, status, error, log_tail, ...}`), `error_message`, `created_at`,
+`started_at`, `completed_at`.
+
+## Errors
+
+```python
+forestsens.ForestSensAPIError(status: int, code: str, message: str, details: Any)
+    # Raised whenever a request itself fails (auth, validation, quota, not_found, ...).
+    # .status, .code, .message, .details
+
+forestsens.BatchFailedError(batch: dict)  # subclass of ForestSensAPIError, code="batch_failed"
+    # Raised specifically by wait_for_batch() when the batch reaches status "failed"
+    # (the request succeeded; the batch itself failed later).
+    # .batch is the full Batch -- .batch["steps"] has each failed step's error/log_tail.
+```
+
+## Known gotchas
+
+- The slot name is `"input"` for every pipeline in the current catalog -- `run()` defaults to it.
+- `upload_files()`'s folder expansion is top-level only (not recursive) and skips dotfiles.
+- `Batch.status` is only ever `"queued"` / `"running"` / `"complete"` / `"failed"` -- never `"done"`.
+- `sens` is `"drone"` (pipelines expect `.jpg` input) or `"point"` (pipelines expect `.las`/`.laz`).
+- This client covers upload/batch/download only -- no API-key management, no typed result tables
+  (detections/segments/tree inventory). Those are reachable directly over HTTP with the same
+  `X-Api-Key` header against `/v1-key/...` but aren't wrapped by this package.
+
+## Minimal complete example
+
+```python
+from forestsens import Client
+
+client = Client()  # FORESTSENS_GATEWAY_HOST / FORESTSENS_API_KEY env vars
+pipeline = client.find_pipeline("Orthophoto (fast)")
+paths = client.run(pipeline, "path/to/photos", dest_dir="downloads", on_progress=print)
+```
+
+---
+For humans, worked multi-step examples, and design rationale: see [Readme.md](Readme.md) and
+[docs/examples.md](docs/examples.md).
