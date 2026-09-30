@@ -22,32 +22,49 @@ than pin a release.)
 ## Quick start
 
 ```python
-from forestsens import Client, BatchFailedError
+from forestsens import Client
 
 client = Client()  # reads FORESTSENS_GATEWAY_HOST / FORESTSENS_API_KEY -- see Configuration below
 
-# 1. Pick a pipeline. Each has an id, a name, and a graph describing its expected input slots.
-pipelines = client.list_pipelines(sens="drone")  # or "point" for LiDAR pipelines
-pipeline = pipelines[0]
+pipeline = client.find_pipeline("Orthophoto (fast)")  # see client.list_pipelines() for the full catalog
+paths = client.run(pipeline, "path/to/your/photos", dest_dir="downloads", on_progress=print)
+```
 
-# 2. Upload your data. Large files (>=16 MiB) are chunked and resumed automatically -- same call either way.
-upload_id = client.upload_files(["orthophoto.tif"], name="my dataset")
+That's the whole workflow: upload a file (or a whole folder of them -- non-recursive, top-level
+files only), run a pipeline, wait for it, download whatever it produced. `on_progress=print` logs
+each status change (`queued` -> `running` -> `complete`) so a long GPU job doesn't look hung.
 
-# 3. Run the pipeline and wait for it to finish.
-batch = client.create_batch(pipeline["id"], [{"slot": "input", "upload_id": upload_id}])
+<details>
+<summary>What <code>run()</code> does under the hood, for when you need more control</summary>
+
+```python
+from forestsens import BatchFailedError
+
+pipeline = client.find_pipeline("Orthophoto (fast)")
+
+# Upload your data. Large files (>=16 MiB) are chunked and resumed automatically -- same call
+# either way, whether you pass one file, a folder, or a list of either.
+upload_id = client.upload_files("path/to/your/photos", name="my dataset")
+
+# Start the pipeline and wait for it to finish. "input" is the right slot name for every
+# pipeline in the current catalog -- run() assumes it too, by default.
+batch = client.create_batch(pipeline.id, [{"slot": "input", "upload_id": upload_id}])
 try:
-    batch = client.wait_for_batch(batch["id"])
+    batch = client.wait_for_batch(batch.id, on_progress=print)
 except BatchFailedError as exc:
     print(f"Batch failed: {exc.message}")
     raise
 
-# 4. Download whatever the batch produced.
-paths = client.download_artifacts(batch["id"], dest_dir="downloads")
+# Download whatever the batch produced.
+paths = client.download_artifacts(batch.id, dest_dir="downloads")
 ```
 
-That's the whole workflow. See [`examples/example_batch.py`](examples/example_batch.py) for a
-full runnable version, and the sections below for how to get a key, configure the client, and
-handle errors.
+Use this form instead of `run()` when a pipeline needs more than one input slot, or you want to
+inspect or act on the batch mid-flight (cancel it, check intermediate step status, etc.).
+</details>
+
+See [`examples/example_batch.py`](examples/example_batch.py) for a full runnable version of both
+forms, and the sections below for how to get a key, configure the client, and handle errors.
 
 ## Getting an API key
 
@@ -105,11 +122,13 @@ client = Client()  # picks up the env vars above
 
 | Method | Returns | Does |
 |---|---|---|
-| `list_pipelines(sens=None)` | `list[dict]` | Lists available pipelines, optionally filtered by sens (`"drone"`, `"point"`, ...). |
-| `upload_files(paths, name=None)` | `str` (upload id) | Uploads one or more local files as a single dataset. |
-| `create_batch(pipeline_id, inputs)` | `dict` (batch) | Starts a pipeline run. `inputs` is `[{"slot": str, "upload_id": str}, ...]`. |
-| `get_batch(batch_id)` | `dict` (batch) | Fetches a batch's current status/detail. |
-| `wait_for_batch(batch_id, poll_interval=5.0, timeout=None)` | `dict` (batch) | Polls until the batch reaches `"complete"` or `"failed"`. Raises `BatchFailedError` on failure. |
+| `list_pipelines(sens=None)` | `list[Pipeline]` | Lists available pipelines, optionally filtered by sens (`"drone"`, `"point"`, ...). `Pipeline` is a real `dict` (`pipeline["id"]` works) with a friendly `.id`/`.name`/`.description` and a clean repr -- printing one shows just its name, not the full internal graph/id payload. |
+| `find_pipeline(name, sens=None)` | `Pipeline` | Looks up a single pipeline by its exact display name (e.g. copied from the web UI) instead of filtering/indexing `list_pipelines()` yourself. Raises `LookupError` (with the real available names) if there's no match, or more than one. |
+| `upload_files(paths, name=None)` | `str` (upload id) | Uploads a file, a folder (its top-level files, not recursive), or a list mixing either, as a single dataset. |
+| `create_batch(pipeline_id, inputs)` | `Batch` | Starts a pipeline run. `inputs` is `[{"slot": str, "upload_id": str}, ...]`. `Batch` is the same friendly-`dict` treatment as `Pipeline` (`.id`/`.status`, `batch["status"]` both work). |
+| `get_batch(batch_id)` | `Batch` | Fetches a batch's current status/detail. |
+| `wait_for_batch(batch_id, poll_interval=5.0, timeout=None, on_progress=None)` | `Batch` | Polls until the batch reaches `"complete"` or `"failed"`. Raises `BatchFailedError` on failure. `on_progress`, if given, is called once per status change -- pass `on_progress=print` for a one-line log. |
+| `run(pipeline, paths, dest_dir, slot="input", name=None, poll_interval=5.0, timeout=None, on_progress=None)` | `list[str]` (local paths) | The common single-input case in one call: upload -> create a batch -> wait -> download. `pipeline` can be a `Pipeline` or a bare id string. |
 | `download_artifacts(batch_id, dest_dir)` | `list[str]` (local paths) | Downloads every artifact the batch produced. |
 
 ### Errors
