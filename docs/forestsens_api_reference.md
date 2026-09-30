@@ -12,7 +12,8 @@ non-null.
 ## Authentication
 
 All requests carry `X-Api-Key: fs_...` and go through the dedicated `/v1-key/{path*}` route (not
-`/v1/{path*}`, which requires a browser-issued JWT this client never has). An API key is issued by a ForestSens administrator -- see the
+`/v1/{path*}`, which requires a browser-issued JWT this client never has). A user generates their
+own API key from their Account page, or a ForestSens administrator issues one for them -- see the
 [Readme](../Readme.md)'s "Getting an API key" section.
 
 ## `GET /v1/pipelines?sens=<sens_code>`
@@ -49,8 +50,8 @@ Returns a batch record with `status: "queued"`.
 
 ## `GET /v1/batches/{batch_id}`
 
-Poll this for status (`queued` -> `running` -> `done`|`failed`), per-step detail (`steps[]`, each
-with `status`/`error`/`log_tail`), and a `results` summary of what's available once done.
+Poll this for status (`queued` -> `running` -> `complete`|`failed`), per-step detail (`steps[]`,
+each with `status`/`error`/`log_tail`), and a `results` summary of what's available once complete.
 
 ## `GET /v1/batches/{batch_id}/artifacts?cursor=`
 
