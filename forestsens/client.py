@@ -55,10 +55,14 @@ class Pipeline(dict):
             raise AttributeError(key) from exc
 
     def __repr__(self) -> str:
-        return f"Pipeline(id={self.get('id')!r}, name={self.get('name')!r})"
+        return f"Pipeline(short_id={self.short_id!r}, name={self.get('name')!r})"
 
     def __str__(self) -> str:
-        return self.get("name") or str(self.get("id"))
+        return f"{self.get('name') or '(unnamed)'} [{self.short_id}]"
+
+    @property
+    def short_id(self) -> str:
+        return self.get("short_id") or str(self.get("id"))[:8]
 
 
 class Batch(dict):
@@ -284,32 +288,31 @@ class Client:
         return [Pipeline(d) for d in self._get("/v1/pipelines", params=params)]
 
     def find_pipeline(self, query: str, sens: str | None = None) -> Pipeline:
-        """Finds one pipeline by any of: its exact name, a case-insensitive
-        part of its name ("canopy", "detectree2"), or the start of its id
-        ("a472746b", as printed by Pipeline's repr). An exact name always
-        wins over a partial match. Raises LookupError with the real
-        candidates if nothing matches or if more than one does.
+        """Finds one pipeline by its short id ("k3x9", as printed by
+        Pipeline's repr), its exact name, a case-insensitive part of its
+        name ("canopy", "detectree2"), or the start of its UUID. Earlier
+        matches win: a short id beats a name, an exact name beats a partial
+        one. Raises LookupError with the real candidates if nothing matches
+        or if more than one does.
         """
         pipelines = self.list_pipelines(sens=sens)
-        exact = [p for p in pipelines if p.get("name") == query]
-        if exact:
-            matches = exact
-        else:
-            needle = query.lower()
-            matches = [
-                p
-                for p in pipelines
-                if needle in (p.get("name") or "").lower() or str(p.get("id")).startswith(needle)
-            ]
+        needle = query.lower()
+        strategies = (
+            lambda p: p.short_id.lower() == needle,
+            lambda p: p.get("name") == query,
+            lambda p: needle in (p.get("name") or "").lower(),
+            lambda p: str(p.get("id")).startswith(needle),
+        )
+        matches: list[Pipeline] = []
+        for matches_by in strategies:
+            matches = [p for p in pipelines if matches_by(p)]
+            if matches:
+                break
         if not matches:
-            available = ", ".join(
-                sorted(f"{p.get('name') or '(unnamed)'} [{str(p.get('id'))[:8]}]" for p in pipelines)
-            )
+            available = ", ".join(sorted(str(p) for p in pipelines))
             raise LookupError(f"no pipeline matches {query!r} -- available: {available or '(none)'}")
         if len(matches) > 1:
-            candidates = ", ".join(
-                sorted(f"{p.get('name')} [{str(p.get('id'))[:8]}]" for p in matches)
-            )
+            candidates = ", ".join(sorted(str(p) for p in matches))
             raise LookupError(f"{query!r} matches more than one pipeline: {candidates}")
         return matches[0]
 

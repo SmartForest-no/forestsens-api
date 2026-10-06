@@ -295,6 +295,30 @@ def test_find_pipeline_matches_the_start_of_the_id():
         assert client.find_pipeline("7c62f609").name == "Individual tree crowns (detectree2)"
 
 
+def test_find_pipeline_matches_the_short_id_and_prints_it():
+    client = make_client()
+    raw = [
+        {"id": "a472746b-0000-0000-0000-000000000000", "short_id": "k3x9", "name": "Canopy cover (DetecTree)"},
+        {"id": "7c62f609-0000-0000-0000-000000000000", "short_id": "m7q2", "name": "Individual tree crowns (detectree2)"},
+    ]
+    with patch("requests.Session.request") as mock_request:
+        mock_request.return_value = envelope_response(data=raw)
+        pipeline = client.find_pipeline("K3X9")
+    assert pipeline.name == "Canopy cover (DetecTree)"
+    assert repr(pipeline) == "Pipeline(short_id='k3x9', name='Canopy cover (DetecTree)')"
+    assert str(pipeline) == "Canopy cover (DetecTree) [k3x9]"
+
+
+def test_find_pipeline_falls_back_to_the_uuid_prefix_when_there_is_no_short_id():
+    client = make_client()
+    with patch("requests.Session.request") as mock_request:
+        mock_request.return_value = envelope_response(
+            data=[{"id": "a472746b-0000-0000-0000-000000000000", "name": "Old"}]
+        )
+        pipeline = client.find_pipeline("a472746b")
+    assert pipeline.short_id == "a472746b"
+
+
 def test_find_pipeline_exact_name_beats_a_partial_match():
     client = make_client()
     raw = [
