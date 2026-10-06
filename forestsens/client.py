@@ -283,23 +283,34 @@ class Client:
         params = {"sens": sens} if sens else None
         return [Pipeline(d) for d in self._get("/v1/pipelines", params=params)]
 
-    def find_pipeline(self, name: str, sens: str | None = None) -> Pipeline:
-        """The common case once you already know what you want to run
-        (e.g. copied off the web UI) -- clearer than filtering
-        list_pipelines() and indexing [0] yourself, and fails with the
-        real available names instead of a bare IndexError if the name's
-        wrong.
+    def find_pipeline(self, query: str, sens: str | None = None) -> Pipeline:
+        """Finds one pipeline by any of: its exact name, a case-insensitive
+        part of its name ("canopy", "detectree2"), or the start of its id
+        ("a472746b", as printed by Pipeline's repr). An exact name always
+        wins over a partial match. Raises LookupError with the real
+        candidates if nothing matches or if more than one does.
         """
         pipelines = self.list_pipelines(sens=sens)
-        matches = [p for p in pipelines if p.get("name") == name]
+        exact = [p for p in pipelines if p.get("name") == query]
+        if exact:
+            matches = exact
+        else:
+            needle = query.lower()
+            matches = [
+                p
+                for p in pipelines
+                if needle in (p.get("name") or "").lower() or str(p.get("id")).startswith(needle)
+            ]
         if not matches:
-            available = (
-                ", ".join(sorted({p.get("name") or str(p.get("id")) for p in pipelines}))
-                or "(none)"
+            available = ", ".join(
+                sorted(f"{p.get('name') or '(unnamed)'} [{str(p.get('id'))[:8]}]" for p in pipelines)
             )
-            raise LookupError(f"no pipeline named {name!r} -- available: {available}")
+            raise LookupError(f"no pipeline matches {query!r} -- available: {available or '(none)'}")
         if len(matches) > 1:
-            raise LookupError(f"multiple pipelines named {name!r} -- pass sens= to disambiguate")
+            candidates = ", ".join(
+                sorted(f"{p.get('name')} [{str(p.get('id'))[:8]}]" for p in matches)
+            )
+            raise LookupError(f"{query!r} matches more than one pipeline: {candidates}")
         return matches[0]
 
     # -- batches ------------------------------------------------------------

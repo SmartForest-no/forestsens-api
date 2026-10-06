@@ -268,8 +268,54 @@ def test_find_pipeline_raises_when_the_name_is_ambiguous():
     raw = [{"id": "p1", "name": "Dup"}, {"id": "p2", "name": "Dup"}]
     with patch("requests.Session.request") as mock_request:
         mock_request.return_value = envelope_response(data=raw)
-        with pytest.raises(LookupError, match="sens="):
+        with pytest.raises(LookupError, match="matches more than one"):
             client.find_pipeline("Dup")
+
+
+def test_find_pipeline_matches_a_case_insensitive_part_of_the_name():
+    client = make_client()
+    raw = [
+        {"id": "a472746b-0000-0000-0000-000000000000", "name": "Canopy cover (DetecTree)"},
+        {"id": "7c62f609-0000-0000-0000-000000000000", "name": "Individual tree crowns (detectree2)"},
+    ]
+    with patch("requests.Session.request") as mock_request:
+        mock_request.return_value = envelope_response(data=raw)
+        assert client.find_pipeline("canopy").id.startswith("a472746b")
+        assert client.find_pipeline("DETECTREE2").id.startswith("7c62f609")
+
+
+def test_find_pipeline_matches_the_start_of_the_id():
+    client = make_client()
+    raw = [
+        {"id": "a472746b-0000-0000-0000-000000000000", "name": "Canopy cover (DetecTree)"},
+        {"id": "7c62f609-0000-0000-0000-000000000000", "name": "Individual tree crowns (detectree2)"},
+    ]
+    with patch("requests.Session.request") as mock_request:
+        mock_request.return_value = envelope_response(data=raw)
+        assert client.find_pipeline("7c62f609").name == "Individual tree crowns (detectree2)"
+
+
+def test_find_pipeline_exact_name_beats_a_partial_match():
+    client = make_client()
+    raw = [
+        {"id": "p1", "name": "Tree"},
+        {"id": "p2", "name": "Tree species detector"},
+    ]
+    with patch("requests.Session.request") as mock_request:
+        mock_request.return_value = envelope_response(data=raw)
+        assert client.find_pipeline("Tree").id == "p1"
+
+
+def test_find_pipeline_partial_match_that_hits_several_pipelines_lists_them():
+    client = make_client()
+    raw = [
+        {"id": "p1", "name": "Orthophoto (fast)"},
+        {"id": "p2", "name": "Orthophoto (highres)"},
+    ]
+    with patch("requests.Session.request") as mock_request:
+        mock_request.return_value = envelope_response(data=raw)
+        with pytest.raises(LookupError, match="Orthophoto \\(fast\\).*Orthophoto \\(highres\\)"):
+            client.find_pipeline("ortho")
 
 
 # -- batches -------------------------------------------------
