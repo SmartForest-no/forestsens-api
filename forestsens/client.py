@@ -55,10 +55,14 @@ class Pipeline(dict):
             raise AttributeError(key) from exc
 
     def __repr__(self) -> str:
-        return f"Pipeline(id={self.get('id')!r}, name={self.get('name')!r})"
+        return f"Pipeline(short_id={self.short_id!r}, name={self.get('name')!r})"
 
     def __str__(self) -> str:
-        return self.get("name") or str(self.get("id"))
+        return f"{self.get('name') or '(unnamed)'} [{self.short_id}]"
+
+    @property
+    def short_id(self) -> str:
+        return self.get("short_id") or str(self.get("id"))[:8]
 
 
 class Batch(dict):
@@ -283,23 +287,33 @@ class Client:
         params = {"sens": sens} if sens else None
         return [Pipeline(d) for d in self._get("/v1/pipelines", params=params)]
 
-    def find_pipeline(self, name: str, sens: str | None = None) -> Pipeline:
-        """The common case once you already know what you want to run
-        (e.g. copied off the web UI) -- clearer than filtering
-        list_pipelines() and indexing [0] yourself, and fails with the
-        real available names instead of a bare IndexError if the name's
-        wrong.
+    def find_pipeline(self, query: str, sens: str | None = None) -> Pipeline:
+        """Finds one pipeline by its short id ("k3x9", as printed by
+        Pipeline's repr), its exact name, a case-insensitive part of its
+        name ("canopy", "detectree2"), or the start of its UUID. Earlier
+        matches win: a short id beats a name, an exact name beats a partial
+        one. Raises LookupError with the real candidates if nothing matches
+        or if more than one does.
         """
         pipelines = self.list_pipelines(sens=sens)
-        matches = [p for p in pipelines if p.get("name") == name]
+        needle = query.lower()
+        strategies = (
+            lambda p: p.short_id.lower() == needle,
+            lambda p: p.get("name") == query,
+            lambda p: needle in (p.get("name") or "").lower(),
+            lambda p: str(p.get("id")).startswith(needle),
+        )
+        matches: list[Pipeline] = []
+        for matches_by in strategies:
+            matches = [p for p in pipelines if matches_by(p)]
+            if matches:
+                break
         if not matches:
-            available = (
-                ", ".join(sorted({p.get("name") or str(p.get("id")) for p in pipelines}))
-                or "(none)"
-            )
-            raise LookupError(f"no pipeline named {name!r} -- available: {available}")
+            available = ", ".join(sorted(str(p) for p in pipelines))
+            raise LookupError(f"no pipeline matches {query!r} -- available: {available or '(none)'}")
         if len(matches) > 1:
-            raise LookupError(f"multiple pipelines named {name!r} -- pass sens= to disambiguate")
+            candidates = ", ".join(sorted(str(p) for p in matches))
+            raise LookupError(f"{query!r} matches more than one pipeline: {candidates}")
         return matches[0]
 
     # -- batches ------------------------------------------------------------
