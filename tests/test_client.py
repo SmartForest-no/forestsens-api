@@ -416,6 +416,37 @@ def test_wait_for_batch_raises_on_failure():
     assert exc_info.value.batch["status"] == "failed"
 
 
+def test_list_batches_returns_batches_and_the_next_cursor():
+    client = make_client()
+    with patch("requests.Session.get") as mock_get:
+        mock_get.return_value = envelope_response(
+            data=[{"id": "b1", "status": "complete"}, {"id": "b2", "status": "running"}],
+            pagination={"next_cursor": "c2"},
+        )
+        batches, next_cursor = client.list_batches(limit=2)
+    assert [b.id for b in batches] == ["b1", "b2"]
+    assert next_cursor == "c2"
+    sent_params = mock_get.call_args.kwargs["params"]
+    assert sent_params == {"sort": "created", "direction": "desc", "limit": 2}  # None fields omitted
+
+
+def test_list_batches_passes_through_every_filter():
+    client = make_client()
+    with patch("requests.Session.get") as mock_get:
+        mock_get.return_value = envelope_response(data=[], pagination={"next_cursor": None})
+        client.list_batches(status="failed", upload_id="u1", created_by="me", cursor="c1")
+    sent_params = mock_get.call_args.kwargs["params"]
+    assert sent_params == {
+        "status": "failed",
+        "upload_id": "u1",
+        "created_by": "me",
+        "sort": "created",
+        "direction": "desc",
+        "limit": 20,
+        "cursor": "c1",
+    }
+
+
 # -- run() convenience -------------------------------------------------
 
 
