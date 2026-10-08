@@ -328,6 +328,39 @@ class Client:
     def get_batch(self, batch_id: str) -> Batch:
         return Batch(self._get(f"/v1/batches/{batch_id}"))
 
+    def list_batches(
+        self,
+        status: str | None = None,
+        upload_id: str | None = None,
+        created_by: str | None = None,
+        sort: str = "created",
+        direction: str = "desc",
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> tuple[list[Batch], str | None]:
+        """One page of batches for the caller's tenant, newest first by
+        default. Returns (batches, next_cursor) -- pass next_cursor back
+        in as cursor to fetch the next page; None means there are no
+        more. There is no pipeline filter here: GET /v1/batches doesn't
+        take one server-side -- filter the returned batches' pipeline_id
+        yourself if you only want one pipeline's.
+        """
+        params = {
+            k: v
+            for k, v in {
+                "status": status,
+                "upload_id": upload_id,
+                "created_by": created_by,
+                "sort": sort,
+                "direction": direction,
+                "limit": limit,
+                "cursor": cursor,
+            }.items()
+            if v is not None
+        }
+        page = self._request_page("/v1/batches", params)
+        return [Batch(b) for b in page["items"]], page["next_cursor"]
+
     def wait_for_batch(
         self,
         batch_id: str,

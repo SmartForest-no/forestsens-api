@@ -126,6 +126,7 @@ client = Client()  # picks up the env vars above
 | `upload_files(paths, name=None)` | `str` (upload id) | Uploads a file, a folder (its top-level files, not recursive), or a list mixing either, as a single dataset. |
 | `create_batch(pipeline_id, inputs)` | `Batch` | Starts a pipeline run. `inputs` is `[{"slot": str, "upload_id": str}, ...]`. `Batch` is the same friendly-`dict` treatment as `Pipeline` (`.id`/`.status`, `batch["status"]` both work). |
 | `get_batch(batch_id)` | `Batch` | Fetches a batch's current status/detail. |
+| `list_batches(status=None, upload_id=None, created_by=None, sort="created", direction="desc", limit=20, cursor=None)` | `(list[Batch], next_cursor)` | One page of batches, newest first by default. No pipeline filter -- filter the returned batches' `pipeline_id` yourself if you only want one pipeline's. |
 | `wait_for_batch(batch_id, poll_interval=5.0, timeout=None, on_progress=None)` | `Batch` | Polls until the batch reaches `"complete"` or `"failed"`. Raises `BatchFailedError` on failure. `on_progress`, if given, is called once per status change -- pass `on_progress=print` for a one-line log. |
 | `run(pipeline, paths, dest_dir, slot="input", name=None, poll_interval=5.0, timeout=None, on_progress=None)` | `list[str]` (local paths) | The common single-input case in one call: upload -> create a batch -> wait -> download. `pipeline` can be a `Pipeline` or a bare id string. |
 | `download_artifacts(batch_id, dest_dir)` | `list[str]` (local paths) | Downloads every artifact the batch produced. |
