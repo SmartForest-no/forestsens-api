@@ -328,6 +328,58 @@ class Client:
     def get_batch(self, batch_id: str) -> Batch:
         return Batch(self._get(f"/v1/batches/{batch_id}"))
 
+    def list_batches(
+        self,
+        status: str | None = None,
+        upload_id: str | None = None,
+        created_by: str | None = None,
+        sort: str = "created",
+        direction: str = "desc",
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> tuple[list[Batch], str | None]:
+        """One page of batches for the caller's tenant, newest first by
+        default. Returns (batches, next_cursor) -- pass next_cursor back
+        in as cursor to fetch the next page; None means there are no
+        more. There is no pipeline filter here: GET /v1/batches doesn't
+        take one server-side. Use iter_batches(pipeline=...) instead if
+        you want only one pipeline's batches.
+        """
+        params = {
+            k: v
+            for k, v in {
+                "status": status,
+                "upload_id": upload_id,
+                "created_by": created_by,
+                "sort": sort,
+                "direction": direction,
+                "limit": limit,
+                "cursor": cursor,
+            }.items()
+            if v is not None
+        }
+        page = self._request_page("/v1/batches", params)
+        return [Batch(b) for b in page["items"]], page["next_cursor"]
+
+    def iter_batches(self, pipeline: str | dict[str, Any] | None = None, **list_kwargs: Any):
+        """Yields Batch objects across every page (paging automatically via
+        list_batches), newest first by default. If pipeline is given (a
+        Pipeline/dict or a bare id), only that pipeline's batches are
+        yielded -- filtered client-side, page by page, since list_batches
+        has no pipeline filter of its own. Stops paging as soon as the
+        caller stops iterating (e.g. itertools.islice for "the last N"),
+        so it never fetches more pages than asked for.
+        """
+        pipeline_id = pipeline["id"] if isinstance(pipeline, dict) else pipeline
+        cursor = list_kwargs.pop("cursor", None)
+        while True:
+            batches, cursor = self.list_batches(cursor=cursor, **list_kwargs)
+            for batch in batches:
+                if pipeline_id is None or batch.get("pipeline_id") == pipeline_id:
+                    yield batch
+            if cursor is None:
+                return
+
     def wait_for_batch(
         self,
         batch_id: str,

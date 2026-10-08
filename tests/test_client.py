@@ -7,6 +7,7 @@ API's.
 from __future__ import annotations
 
 import json
+from itertools import islice
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -414,6 +415,59 @@ def test_wait_for_batch_raises_on_failure():
             client.wait_for_batch("batch-1", poll_interval=0.01)
     assert exc_info.value.message == "step 2 blew up"
     assert exc_info.value.batch["status"] == "failed"
+
+
+def test_list_batches_returns_batches_and_the_next_cursor():
+    client = make_client()
+    with patch("requests.Session.get") as mock_get:
+        mock_get.return_value = envelope_response(
+            data=[{"id": "b1", "status": "complete"}, {"id": "b2", "status": "running"}],
+            pagination={"next_cursor": "c2"},
+        )
+        batches, next_cursor = client.list_batches(limit=2)
+    assert [b.id for b in batches] == ["b1", "b2"]
+    assert next_cursor == "c2"
+    sent_params = mock_get.call_args.kwargs["params"]
+    assert sent_params == {"sort": "created", "direction": "desc", "limit": 2}  # None fields omitted
+
+
+def test_iter_batches_pages_through_every_batch():
+    client = make_client()
+    with patch("requests.Session.get") as mock_get:
+        mock_get.side_effect = [
+            envelope_response(data=[{"id": "b1"}, {"id": "b2"}], pagination={"next_cursor": "c2"}),
+            envelope_response(data=[{"id": "b3"}], pagination={"next_cursor": None}),
+        ]
+        ids = [b.id for b in client.iter_batches()]
+    assert ids == ["b1", "b2", "b3"]
+
+
+def test_iter_batches_filters_by_pipeline_across_pages():
+    client = make_client()
+    with patch("requests.Session.get") as mock_get:
+        mock_get.side_effect = [
+            envelope_response(
+                data=[{"id": "b1", "pipeline_id": "p1"}, {"id": "b2", "pipeline_id": "p2"}],
+                pagination={"next_cursor": "c2"},
+            ),
+            envelope_response(data=[{"id": "b3", "pipeline_id": "p1"}], pagination={"next_cursor": None}),
+        ]
+        ids = [b.id for b in client.iter_batches(pipeline="p1")]
+    assert ids == ["b1", "b3"]
+
+
+def test_iter_batches_stops_as_soon_as_the_caller_stops_asking():
+    """itertools.islice(iter_batches(...), N) must not page past what's needed --
+    confirmed here by only mocking one page and never letting a second request happen.
+    """
+    client = make_client()
+    with patch("requests.Session.get") as mock_get:
+        mock_get.return_value = envelope_response(
+            data=[{"id": "b1"}, {"id": "b2"}, {"id": "b3"}], pagination={"next_cursor": "c2"}
+        )
+        first_two = list(islice(client.iter_batches(), 2))
+    assert [b.id for b in first_two] == ["b1", "b2"]
+    assert mock_get.call_count == 1
 
 
 # -- run() convenience -------------------------------------------------

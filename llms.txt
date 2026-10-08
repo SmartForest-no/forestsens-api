@@ -39,6 +39,17 @@ Client.create_batch(pipeline_id: str, inputs: list[dict]) -> Batch
 
 Client.get_batch(batch_id: str) -> Batch
 
+Client.list_batches(
+    status: str | None = None, upload_id: str | None = None, created_by: str | None = None,
+    sort: str = "created", direction: str = "desc", limit: int = 20, cursor: str | None = None,
+) -> tuple[list[Batch], str | None]  # (batches, next_cursor); next_cursor is None on the last page
+    # No pipeline filter server-side -- use iter_batches for one pipeline's batches only.
+
+Client.iter_batches(pipeline: str | dict | None = None, **list_batches_kwargs) -> Iterator[Batch]
+    # Pages through list_batches automatically, yielding every Batch. If pipeline is given
+    # (a Pipeline or a bare id), only that pipeline's batches are yielded (filtered client-side).
+    # Stops paging as soon as the caller stops iterating -- safe with itertools.islice(..., N).
+
 Client.wait_for_batch(
     batch_id: str,
     poll_interval: float = 5.0,
