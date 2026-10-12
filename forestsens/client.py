@@ -116,7 +116,12 @@ class Client:
                 "FORESTSENS_GATEWAY_HOST/FORESTSENS_API_KEY, or in "
                 f"{config_path or DEFAULT_CONFIG_PATH}"
             )
-        self.gateway_host = self.gateway_host.rstrip("/")
+        # Accept what people naturally paste: "https://host/" as well as "host".
+        host = self.gateway_host.strip()
+        for scheme in ("https://", "http://"):
+            if host.lower().startswith(scheme):
+                host = host[len(scheme):]
+        self.gateway_host = host.rstrip("/")
         self._session = requests.Session()
 
     # -- low-level request core -------------------------------------------------
