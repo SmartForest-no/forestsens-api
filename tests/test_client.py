@@ -223,7 +223,7 @@ def test_list_pipelines_returns_a_simple_printable_view():
     client = make_client()
     raw = {
         "id": "p1",
-        "tenant_id": None,
+        "account_id": None,
         "sens_id": "s1",
         "name": "Orthophoto (fast)",
         "description": "Fast orthomosaic",

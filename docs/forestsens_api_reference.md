@@ -1,7 +1,7 @@
 # ForestSens API reference (subset used by this client)
 
 This describes the real REST endpoints the `forestsens` package wraps -- the subset needed for
-upload/batch/download. It is not the full ForestSens API (which also covers tenant/API-key
+upload/batch/download. It is not the full ForestSens API (which also covers account/API-key
 administration, typed result tables, and more) -- see the [Readme](../Readme.md)'s "Full API
 reference" section for the complete, always-current OpenAPI spec.
 
