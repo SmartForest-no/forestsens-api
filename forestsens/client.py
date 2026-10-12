@@ -41,7 +41,7 @@ def _load_config_file(path: Path) -> dict[str, Any]:
 
 class Pipeline(dict):
     """list_pipelines()/find_pipeline() wrap each raw pipeline dict in this so printing/repr-ing
-    one (or a list of them) shows just id/name -- not the internal graph/tenant_id/sens_id/
+    one (or a list of them) shows just id/name -- not the internal graph/account_id/sens_id/
     created_at noise a researcher never needs to pick a pipeline by name -- while staying a real
     dict throughout: pipeline["id"], **pipeline, json.dumps(pipeline), and every existing
     dict-based caller keep working unchanged. Attribute access (.id/.name/.description) is added
@@ -338,7 +338,7 @@ class Client:
         limit: int = 20,
         cursor: str | None = None,
     ) -> tuple[list[Batch], str | None]:
-        """One page of batches for the caller's tenant, newest first by
+        """One page of batches for the caller's account, newest first by
         default. Returns (batches, next_cursor) -- pass next_cursor back
         in as cursor to fetch the next page; None means there are no
         more. There is no pipeline filter here: GET /v1/batches doesn't
