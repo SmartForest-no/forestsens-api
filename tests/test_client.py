@@ -506,3 +506,10 @@ def test_download_artifacts_streams_each_artifact_to_dest_dir(tmp_path):
     local_path = tmp_path / "results_zip_artifact.zip"
     assert local_path.exists()
     assert local_path.read_bytes() == b"filebytes"
+
+
+def test_gateway_host_may_be_given_with_a_scheme_and_trailing_slash():
+    for given in ("h.example.com", "https://h.example.com", "https://h.example.com/", "HTTPS://h.example.com/"):
+        client = Client(gateway_host=given, api_key="fs_x")
+        assert client.gateway_host == "h.example.com"
+        assert client._url("/v1/pipelines") == "https://h.example.com/v1-key/pipelines"
