@@ -1,4 +1,4 @@
-> **v1 beta, open to invited testers.** This README (and the `v3.0.2` tag) describe the client for
+> **v1 beta, open to invited testers.** This README (and the `v3.1.0` tag) describe the client for
 > ForestSens' new, OCI-hosted API. It is in beta: new endpoints and fields may be added at any time, and
 > removing or changing anything documented is announced at least 90 days ahead (see the stability policy
 > at `https://<your host>/api-docs/stability.html`). Your host name and an API key come with your
@@ -27,7 +27,7 @@ platform-side instructions for assistants.
 ## Install
 
 ```bash
-pip install git+https://github.com/SmartForest-no/forestsens-python.git@v3.0.2
+pip install git+https://github.com/SmartForest-no/forestsens-python.git@v3.1.0
 ```
 
 (Or `@main` for the latest commit on the default branch, if you want to track development rather
@@ -131,13 +131,23 @@ client = Client()  # picks up the env vars above
 |---|---|---|
 | `list_pipelines(sens=None)` | `list[Pipeline]` | Lists available pipelines, optionally filtered by sens (`"drone"`, `"point"`, ...). `Pipeline` is a real `dict` (`pipeline["id"]` works) with a friendly `.id`/`.name`/`.description` and a clean repr -- printing one shows just its name, not the full internal graph/id payload. |
 | `find_pipeline(name, sens=None)` | `Pipeline` | Looks up a single pipeline by its exact display name (e.g. copied from the web UI) instead of filtering/indexing `list_pipelines()` yourself. Raises `LookupError` (with the real available names) if there's no match, or more than one. |
-| `upload_files(paths, name=None)` | `str` (upload id) | Uploads a file, a folder (its top-level files, not recursive), or a list mixing either, as a single dataset. |
+| `upload_files(paths, name=None, on_progress=None)` | `str` (upload id) | Uploads a file, a folder (its top-level files, not recursive), or a list mixing either, as a single dataset. `on_progress`, if given, is called as `on_progress(filename, loaded_bytes, total_bytes)` while each file uploads (see below). |
 | `create_batch(pipeline_id, inputs)` | `Batch` | Starts a pipeline run. `inputs` is `[{"slot": str, "upload_id": str}, ...]`. `Batch` is the same friendly-`dict` treatment as `Pipeline` (`.id`/`.status`, `batch["status"]` both work). |
 | `get_batch(batch_id)` | `Batch` | Fetches a batch's current status/detail. |
 | `list_batches(status=None, upload_id=None, created_by=None, sort="created", direction="desc", limit=20, cursor=None)` | `(list[Batch], next_cursor)` | One page of batches, newest first by default. No pipeline filter -- filter the returned batches' `pipeline_id` yourself if you only want one pipeline's. |
 | `wait_for_batch(batch_id, poll_interval=5.0, timeout=None, on_progress=None)` | `Batch` | Polls until the batch reaches `"complete"` or `"failed"`. Raises `BatchFailedError` on failure. `on_progress`, if given, is called once per status change -- pass `on_progress=print` for a one-line log. |
-| `run(pipeline, paths, dest_dir, slot="input", name=None, poll_interval=5.0, timeout=None, on_progress=None)` | `list[str]` (local paths) | The common single-input case in one call: upload -> create a batch -> wait -> download. `pipeline` can be a `Pipeline` or a bare id string. |
+| `run(pipeline, paths, dest_dir, slot="input", name=None, poll_interval=5.0, timeout=None, on_progress=None, on_upload_progress=None)` | `list[str]` (local paths) | The common single-input case in one call: upload -> create a batch -> wait -> download. `pipeline` can be a `Pipeline` or a bare id string. |
 | `download_artifacts(batch_id, dest_dir)` | `list[str]` (local paths) | Downloads every artifact the batch produced. |
+
+**Upload progress.** Uploads are silent by default. Pass a callback to see them:
+
+```python
+client.upload_files("path/to/your/photos", on_progress=lambda name, done, total: print(f"{name}: {done / total:.0%}"))
+# or, with run(): client.run(pipeline, "path/to/your/photos", "downloads", on_upload_progress=...)
+```
+
+It is called with `0` when a file starts, about once per percent while it uploads (once per chunk for large files),
+and with `total` when it is done. After a retry, `loaded_bytes` can start over from a lower value.
 
 ### Errors
 
