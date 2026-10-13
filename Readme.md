@@ -1,13 +1,13 @@
-> **v1 beta, open to invited testers.** This README (and the `v3.0.1` tag) describe the client for
+> **v1 beta, open to invited testers.** This README (and the `v3.0.2` tag) describe the client for
 > ForestSens' new, OCI-hosted API. It is in beta: new endpoints and fields may be added at any time, and
 > removing or changing anything documented is announced at least 90 days ahead (see the stability policy
 > at `https://<your host>/api-docs/stability.html`). Your host name and an API key come with your
 > invitation.
 >
 > Looking for the client for the current, Oracle APEX-based ForestSens system? Use the
-> [`v1.0.0` release](https://github.com/SmartForest-no/forestsens-api/releases/tag/v1.0.0):
+> [`v1.0.0` release](https://github.com/SmartForest-no/forestsens-python/releases/tag/v1.0.0):
 > ```bash
-> pip install git+https://github.com/SmartForest-no/forestsens-api.git@v1.0.0
+> pip install git+https://github.com/SmartForest-no/forestsens-python.git@v1.0.0
 > ```
 
 # forestsens
@@ -27,7 +27,7 @@ platform-side instructions for assistants.
 ## Install
 
 ```bash
-pip install git+https://github.com/SmartForest-no/forestsens-api.git@v3.0.1
+pip install git+https://github.com/SmartForest-no/forestsens-python.git@v3.0.2
 ```
 
 (Or `@main` for the latest commit on the default branch, if you want to track development rather

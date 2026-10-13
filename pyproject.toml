@@ -1,6 +1,6 @@
 [project]
 name = "forestsens"
-version = "3.0.1"
+version = "3.0.2"
 description = "Python client for the ForestSens API (upload, batch, download)"
 readme = "Readme.md"
 license = { text = "MIT" }
@@ -15,7 +15,7 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/SmartForest-no/forestsens-api"
+Repository = "https://github.com/SmartForest-no/forestsens-python"
 
 [project.optional-dependencies]
 dev = [
