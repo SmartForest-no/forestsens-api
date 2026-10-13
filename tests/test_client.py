@@ -294,7 +294,159 @@ def test_run_passes_on_upload_progress_to_the_upload(tmp_path):
         client, "download_artifacts", return_value=[]
     ):
         client.run("p", local_file, tmp_path / "d", on_upload_progress=callback)
-    mock_upload.assert_called_once_with(local_file, name=None, on_progress=callback)
+    mock_upload.assert_called_once_with(
+        local_file, name=None, on_progress=callback, project=None, private=False
+    )
+
+
+# -- projects, visibility and sharing ----------------------------------
+
+PROJECT_ID = "11111111-1111-1111-1111-111111111111"
+OTHER_PROJECT_ID = "22222222-2222-2222-2222-222222222222"
+ANNA_ID = "33333333-3333-3333-3333-333333333333"
+BEN_ID = "44444444-4444-4444-4444-444444444444"
+PROJECTS = [
+    {"id": PROJECT_ID, "name": "Storm 2026", "dataset_count": 3, "can_manage": True},
+    {"id": OTHER_PROJECT_ID, "name": "Wheel ruts", "dataset_count": 1, "can_manage": True},
+]
+MEMBERS = [
+    {"user_id": ANNA_ID, "email": "anna@example.com", "display_name": "Anna", "is_me": False},
+    {"user_id": BEN_ID, "email": "ben@example.com", "display_name": None, "is_me": True},
+]
+
+
+def test_projects_are_listed_created_renamed_and_deleted():
+    client = make_client()
+    with patch("requests.Session.request") as mock_request:
+        mock_request.side_effect = [
+            envelope_response(data=PROJECTS),
+            envelope_response(data=PROJECTS[0]),
+            envelope_response(data={**PROJECTS[0], "name": "Storm"}),
+            envelope_response(data=None),
+        ]
+        projects = client.list_projects()
+        created = client.create_project("Storm 2026")
+        renamed = client.rename_project(created, "Storm")
+        client.delete_project(PROJECT_ID)
+
+    assert [p.name for p in projects] == ["Storm 2026", "Wheel ruts"]
+    assert created.id == PROJECT_ID and renamed.name == "Storm"
+    calls = [(c.args[0], c.args[1].split("/v1-key")[1]) for c in mock_request.call_args_list]
+    assert calls == [
+        ("GET", "/projects"),
+        ("POST", "/projects"),
+        ("PATCH", f"/projects/{PROJECT_ID}"),
+        ("DELETE", f"/projects/{PROJECT_ID}"),
+    ]
+
+
+def test_a_project_can_be_given_as_object_id_or_name():
+    client = make_client()
+    with patch("requests.Session.request", return_value=envelope_response(data=PROJECTS)):
+        assert client._project_id(PROJECTS[0]) == PROJECT_ID
+        assert client._project_id(OTHER_PROJECT_ID) == OTHER_PROJECT_ID
+        assert client._project_id("wheel RUTS") == OTHER_PROJECT_ID
+        with pytest.raises(LookupError, match="Storm 2026"):
+            client._project_id("nope")
+
+
+def test_upload_files_sends_project_and_private():
+    client = make_client()
+    created = {"id": "u", "files": []}
+    with patch("requests.Session.request") as mock_request, patch.object(
+        client, "_resolve_paths", return_value=[]
+    ):
+        mock_request.side_effect = [envelope_response(data=created), envelope_response(data={"id": "u"})]
+        client.upload_files(["x"], project=PROJECTS[0], private=True)
+    body = mock_request.call_args_list[0].kwargs["json"]
+    assert body["project_id"] == PROJECT_ID and body["visibility"] == "private"
+
+
+def test_upload_files_default_sends_neither_project_nor_visibility():
+    client = make_client()
+    with patch("requests.Session.request") as mock_request, patch.object(
+        client, "_resolve_paths", return_value=[]
+    ):
+        mock_request.side_effect = [envelope_response(data={"id": "u", "files": []}), envelope_response(data={})]
+        client.upload_files(["x"])
+    body = mock_request.call_args_list[0].kwargs["json"]
+    assert "project_id" not in body and "visibility" not in body
+
+
+def test_run_passes_project_and_private_to_the_upload(tmp_path):
+    client = make_client()
+    f = tmp_path / "a.jpg"
+    f.write_bytes(b"abc")
+    with patch.object(client, "upload_files", return_value="u") as mock_upload, patch.object(
+        client, "create_batch", return_value=Batch({"id": "b", "status": "queued"})
+    ), patch.object(client, "wait_for_batch", return_value=Batch({"id": "b", "status": "complete"})), patch.object(
+        client, "download_artifacts", return_value=[]
+    ):
+        client.run("p", f, tmp_path / "d", project="Storm 2026", private=True)
+    assert mock_upload.call_args.kwargs["project"] == "Storm 2026"
+    assert mock_upload.call_args.kwargs["private"] is True
+
+
+def test_list_uploads_filters_and_returns_the_next_cursor():
+    client = make_client()
+    upload = {"id": "u1", "name": "Flight", "visibility": "private", "project_id": PROJECT_ID}
+    resp = MagicMock(ok=True, status_code=200)
+    resp.json.return_value = {"data": [upload], "meta": {"pagination": {"next_cursor": "c2"}}, "error": None}
+    with patch("requests.Session.get", return_value=resp) as mock_get, patch(
+        "requests.Session.request", return_value=envelope_response(data=PROJECTS)
+    ):
+        uploads, cursor = client.list_uploads(project="Storm 2026", created_by="me")
+        client.list_uploads(no_project=True)
+    assert uploads[0].visibility == "private" and cursor == "c2"
+    first, second = (c.kwargs["params"] for c in mock_get.call_args_list)
+    assert first["project_id"] == PROJECT_ID and first["created_by"] == "me"
+    assert second["project_id"] == "none"
+
+
+def test_update_upload_only_sends_what_is_passed_and_none_removes_the_project():
+    client = make_client()
+    with patch("requests.Session.request", return_value=envelope_response(data={"id": "u"})) as mock_request:
+        client.update_upload("u", private=True)
+        client.update_upload("u", project=None)
+        client.update_upload("u", name="New", project=PROJECT_ID, private=False)
+    bodies = [c.kwargs["json"] for c in mock_request.call_args_list]
+    assert bodies == [
+        {"visibility": "private"},
+        {"project_id": None},
+        {"name": "New", "project_id": PROJECT_ID, "visibility": "account"},
+    ]
+
+
+def test_set_upload_shares_accepts_ids_members_and_emails_and_replaces_the_list():
+    client = make_client()
+    shared = [{"user_id": ANNA_ID, "email": "anna@example.com", "display_name": "Anna"}]
+    with patch("requests.Session.request") as mock_request:
+        mock_request.side_effect = [
+            envelope_response(data=MEMBERS),  # e-mail lookup, once
+            envelope_response(data=shared),
+        ]
+        result = client.set_upload_shares("u", [BEN_ID, "Anna@Example.com", MEMBERS[0]])
+    put = mock_request.call_args_list[1]
+    assert put.args[0] == "PUT" and put.args[1].endswith("/uploads/u/shares")
+    assert put.kwargs["json"] == {"user_ids": [BEN_ID, ANNA_ID, ANNA_ID]}
+    assert result[0].email == "anna@example.com" 
+
+
+def test_set_upload_shares_rejects_an_unknown_email():
+    client = make_client()
+    with patch("requests.Session.request", return_value=envelope_response(data=MEMBERS)):
+        with pytest.raises(LookupError, match="nobody@example.com"):
+            client.set_upload_shares("u", ["nobody@example.com"])
+
+
+def test_members_and_shares_are_listed():
+    client = make_client()
+    with patch("requests.Session.request") as mock_request:
+        mock_request.side_effect = [envelope_response(data=MEMBERS), envelope_response(data=MEMBERS[:1])]
+        members = client.list_members()
+        shares = client.get_upload_shares("u")
+    assert [m.email for m in members] == ["anna@example.com", "ben@example.com"]
+    assert shares[0].user_id == ANNA_ID
 
 
 # -- pipelines -------------------------------------------------
@@ -547,7 +699,9 @@ def test_run_uploads_creates_a_batch_waits_and_downloads_in_one_call(tmp_path):
         paths = client.run("pipeline-1", local_file, dest_dir, on_progress=print)
 
     assert paths == ["downloads/a.tif"]
-    mock_upload.assert_called_once_with(local_file, name=None, on_progress=None)
+    mock_upload.assert_called_once_with(
+        local_file, name=None, on_progress=None, project=None, private=False
+    )
     mock_create.assert_called_once_with("pipeline-1", [{"slot": "input", "upload_id": "upload-1"}])
     mock_wait.assert_called_once_with("batch-1", poll_interval=5.0, timeout=None, on_progress=print)
     mock_download.assert_called_once_with("batch-1", dest_dir)
