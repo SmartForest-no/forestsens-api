@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -83,6 +84,53 @@ class Batch(dict):
 
     def __str__(self) -> str:
         return f"{self.get('id')} ({self.get('status')})"
+
+
+class _View(dict):
+    """Base for the friendly dict views below: a real dict throughout (item access, ** unpacking,
+    json.dumps) with attribute access (.id/.name) added on top."""
+
+    def __getattr__(self, key: str) -> Any:
+        try:
+            return self[key]
+        except KeyError as exc:
+            raise AttributeError(key) from exc
+
+
+class Project(_View):
+    """A project groups datasets. `.id`, `.name`, `.dataset_count`, `.can_manage`."""
+
+    def __repr__(self) -> str:
+        return f"Project(id={self.get('id')!r}, name={self.get('name')!r})"
+
+    def __str__(self) -> str:
+        return f"{self.get('name')} ({self.get('dataset_count', 0)} datasets)"
+
+
+class Upload(_View):
+    """A dataset. `.id`, `.name`, `.status`, `.visibility` ("account" or "private"), `.project_id`,
+    `.project_name`, `.shared_with_count`, `.files`, `.can_manage`."""
+
+    def __repr__(self) -> str:
+        return f"Upload(id={self.get('id')!r}, name={self.get('name')!r}, visibility={self.get('visibility')!r})"
+
+    def __str__(self) -> str:
+        return f"{self.get('name') or self.get('id')} [{self.get('visibility')}]"
+
+
+class Member(_View):
+    """A member of your account: `.user_id`, `.email`, `.display_name` (and `.is_me` from
+    list_members())."""
+
+    def __repr__(self) -> str:
+        return f"Member(user_id={self.get('user_id')!r}, email={self.get('email')!r})"
+
+    def __str__(self) -> str:
+        return f"{self.get('display_name') or self.get('email')} <{self.get('email')}>"
+
+
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_KEEP: Any = object()  # "leave unchanged" marker for update_upload(project=...)
 
 
 class _ProgressFile:
@@ -190,6 +238,8 @@ class Client:
         paths: str | os.PathLike[str] | list[str | os.PathLike[str]],
         name: str | None = None,
         on_progress: Callable[[str, int, int], None] | None = None,
+        project: str | dict[str, Any] | None = None,
+        private: bool = False,
     ) -> str:
         """Creates a dataset from one or more local files and returns its
         upload_id. Sequential per file, on purpose -- simpler than the
@@ -203,20 +253,26 @@ class Client:
         over from a lower value. Default `None` is silent. Example:
         `on_progress=lambda name, done, total: print(f"{name}: {done / total:.0%}")`.
 
+        `project` puts the dataset in a project: a `Project` from list_projects()/create_project(),
+        a project id, or an exact project name (see list_projects()). `private=True` makes the
+        dataset visible only to you, account admins and the members you share it with
+        (set_upload_shares()); the default is visible to your whole account.
+
         `paths` can be a single file, a single folder (its top-level files
         are uploaded, see _resolve_paths), or a list mixing either.
         """
         paths = self._resolve_paths(paths)
-        created = self._post(
-            "/v1/uploads",
-            {
-                "files": [
-                    {"filename": p.name, "mime_type": mimetypes.guess_type(p.name)[0]}
-                    for p in paths
-                ],
-                "name": name,
-            },
-        )
+        body: dict[str, Any] = {
+            "files": [
+                {"filename": p.name, "mime_type": mimetypes.guess_type(p.name)[0]} for p in paths
+            ],
+            "name": name,
+        }
+        if project is not None:
+            body["project_id"] = self._project_id(project)
+        if private:
+            body["visibility"] = "private"
+        created = self._post("/v1/uploads", body)
         upload_id = created["id"]
         file_by_name = {p.name: p for p in paths}
 
@@ -346,6 +402,126 @@ class Client:
                     report(loaded)
 
         self._post(f"{base}/commit")
+
+    # -- projects, datasets and sharing ---------------------------------------
+
+    def list_projects(self) -> list[Project]:
+        """The projects of your account."""
+        return [Project(p) for p in self._get("/v1/projects")]
+
+    def create_project(self, name: str) -> Project:
+        return Project(self._post("/v1/projects", {"name": name}))
+
+    def rename_project(self, project: str | dict[str, Any], name: str) -> Project:
+        return Project(
+            self._request("PATCH", f"/v1/projects/{self._project_id(project)}", json={"name": name})
+        )
+
+    def delete_project(self, project: str | dict[str, Any]) -> None:
+        """Deletes the project only; its datasets are kept (they just belong to no project)."""
+        self._request("DELETE", f"/v1/projects/{self._project_id(project)}")
+
+    def _project_id(self, project: str | dict[str, Any]) -> str:
+        """A Project/dict (its "id"), a project id, or an exact (case-insensitive) project name."""
+        if isinstance(project, dict):
+            return str(project["id"])
+        if _UUID_RE.match(project):
+            return project
+        matches = [p for p in self.list_projects() if p["name"].lower() == project.lower()]
+        if len(matches) == 1:
+            return str(matches[0]["id"])
+        names = sorted(p["name"] for p in self.list_projects())
+        if not matches:
+            raise LookupError(f"no project named {project!r}; projects: {names}")
+        raise LookupError(f"several projects are named {project!r}; pass the project id instead")
+
+    def list_uploads(
+        self,
+        project: str | dict[str, Any] | None = None,
+        no_project: bool = False,
+        created_by: str | None = None,
+        status: str | None = None,
+        sort: str = "created",
+        direction: str = "desc",
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> tuple[list[Upload], str | None]:
+        """One page of datasets you can see (yours, your account's non-private ones, and private
+        ones shared with you), newest first by default. Returns (uploads, next_cursor), like
+        list_batches(). `project` limits it to one project (Project, id or name); `no_project=True`
+        to datasets in no project; `created_by` is "me" or a user id.
+        """
+        params = {
+            k: v
+            for k, v in {
+                "project_id": "none" if no_project else (self._project_id(project) if project else None),
+                "created_by": created_by,
+                "status": status,
+                "sort": sort,
+                "direction": direction,
+                "limit": limit,
+                "cursor": cursor,
+            }.items()
+            if v is not None
+        }
+        page = self._request_page("/v1/uploads", params)
+        return [Upload(u) for u in page["items"]], page["next_cursor"]
+
+    def get_upload(self, upload_id: str) -> Upload:
+        return Upload(self._get(f"/v1/uploads/{upload_id}"))
+
+    def update_upload(
+        self,
+        upload_id: str,
+        *,
+        name: str | None = None,
+        project: Any = _KEEP,
+        private: bool | None = None,
+    ) -> Upload:
+        """Changes only what you pass. `name` renames ("" restores the default name); `project`
+        moves it to a project (Project, id or name) or, with `project=None`, out of its project;
+        `private=True/False` makes it private or visible to your account again. Changing project or
+        visibility is for the dataset's creator or an account admin.
+        """
+        body: dict[str, Any] = {}
+        if name is not None:
+            body["name"] = name
+        if project is not _KEEP:
+            body["project_id"] = None if project is None else self._project_id(project)
+        if private is not None:
+            body["visibility"] = "private" if private else "account"
+        return Upload(self._request("PATCH", f"/v1/uploads/{upload_id}", json=body))
+
+    def list_members(self) -> list[Member]:
+        """The members of your account (to choose whom to share a dataset with)."""
+        return [Member(m) for m in self._get("/v1/users/members")]
+
+    def get_upload_shares(self, upload_id: str) -> list[Member]:
+        """The members a private dataset is shared with."""
+        return [Member(m) for m in self._get(f"/v1/uploads/{upload_id}/shares")]
+
+    def set_upload_shares(self, upload_id: str, users: list[str | dict[str, Any]]) -> list[Member]:
+        """Sets the members a private dataset is shared with; this REPLACES the previous list, so
+        pass everyone who should have access (an empty list removes all shares). Each entry is a
+        user id, an e-mail address, or a Member from list_members(). Returns the new list.
+        """
+        members: list[Member] | None = None
+        ids: list[str] = []
+        for user in users:
+            if isinstance(user, dict):
+                ids.append(str(user["user_id"]))
+            elif _UUID_RE.match(user):
+                ids.append(user)
+            else:
+                members = members if members is not None else self.list_members()
+                found = [m for m in members if m["email"].lower() == user.lower()]
+                if not found:
+                    raise LookupError(f"no member with e-mail {user!r} in your account")
+                ids.append(str(found[0]["user_id"]))
+        return [
+            Member(m)
+            for m in self._request("PUT", f"/v1/uploads/{upload_id}/shares", json={"user_ids": ids})
+        ]
 
     # -- pipelines ------------------------------------------------------------
 
@@ -481,6 +657,8 @@ class Client:
         timeout: float | None = None,
         on_progress: Callable[[Batch], None] | None = None,
         on_upload_progress: Callable[[str, int, int], None] | None = None,
+        project: str | dict[str, Any] | None = None,
+        private: bool = False,
     ) -> list[str]:
         """Upload -> start a batch -> wait -> download, for the common
         single-input case -- collapses the whole upload/create_batch/
@@ -494,10 +672,13 @@ class Client:
         shortcut for the common case, not a replacement for them.
 
         `on_progress` reports the batch's status changes; `on_upload_progress` reports the upload
-        as `(filename, loaded_bytes, total_bytes)`, see upload_files().
+        as `(filename, loaded_bytes, total_bytes)`, see upload_files(). `project` and `private` are
+        passed to upload_files() too.
         """
         pipeline_id = pipeline["id"] if isinstance(pipeline, dict) else pipeline
-        upload_id = self.upload_files(paths, name=name, on_progress=on_upload_progress)
+        upload_id = self.upload_files(
+            paths, name=name, on_progress=on_upload_progress, project=project, private=private
+        )
         batch = self.create_batch(pipeline_id, [{"slot": slot, "upload_id": upload_id}])
         batch = self.wait_for_batch(
             batch["id"], poll_interval=poll_interval, timeout=timeout, on_progress=on_progress
