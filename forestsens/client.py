@@ -85,6 +85,31 @@ class Batch(dict):
         return f"{self.get('id')} ({self.get('status')})"
 
 
+class _ProgressFile:
+    """File-like wrapper that reports how many bytes have been read (i.e. sent) while a file is
+    uploaded in one request. `requests` streams it using `__len__` for the Content-Length.
+    Reports at most about once per percent, so a callback that prints does not flood the terminal."""
+
+    def __init__(self, fileobj: Any, size: int, report: Callable[[int], None]) -> None:
+        self._f = fileobj
+        self._size = size
+        self._report = report
+        self._sent = 0
+        self._last = 0
+        self._step = max(size // 100, 256 * 1024)
+
+    def __len__(self) -> int:
+        return self._size
+
+    def read(self, n: int = -1) -> bytes:
+        data = self._f.read(n)
+        self._sent += len(data)
+        if self._sent - self._last >= self._step or self._sent >= self._size:
+            self._last = self._sent
+            self._report(min(self._sent, self._size))
+        return data
+
+
 class Client:
     def __init__(
         self,
@@ -164,13 +189,19 @@ class Client:
         self,
         paths: str | os.PathLike[str] | list[str | os.PathLike[str]],
         name: str | None = None,
+        on_progress: Callable[[str, int, int], None] | None = None,
     ) -> str:
         """Creates a dataset from one or more local files and returns its
         upload_id. Sequential per file, on purpose -- simpler than the
-        frontend's bounded-concurrency pool; a script-driven client
-        doesn't need the same UX polish a browser progress bar does.
+        frontend's bounded-concurrency pool.
         Each file (or, for a large file, each chunk) is retried up to
         MAX_ATTEMPTS times with a short backoff before giving up.
+
+        `on_progress`, if given, is called as `on_progress(filename, loaded_bytes, total_bytes)`:
+        with 0 when a file starts, while it uploads (about once per percent; per chunk for large
+        files), and with `total_bytes` when it is done. After a retry `loaded_bytes` may start
+        over from a lower value. Default `None` is silent. Example:
+        `on_progress=lambda name, done, total: print(f"{name}: {done / total:.0%}")`.
 
         `paths` can be a single file, a single folder (its top-level files
         are uploaded, see _resolve_paths), or a list mixing either.
@@ -192,10 +223,15 @@ class Client:
         for file_out in created["files"]:
             local_path = file_by_name[file_out["filename"]]
             size = local_path.stat().st_size
+            report = None
+            if on_progress is not None:
+                def report(loaded: int, name: str = local_path.name, total: int = size) -> None:
+                    on_progress(name, loaded, total)
+
             if size <= MULTIPART_CHUNK_SIZE_BYTES:
-                self._upload_small_file(file_out["upload_url"], local_path)
+                self._upload_small_file(file_out["upload_url"], local_path, report)
             else:
-                self._upload_large_file(upload_id, file_out["id"], local_path, size)
+                self._upload_large_file(upload_id, file_out["id"], local_path, size, report)
 
         self._post(f"/v1/uploads/{upload_id}/complete", {})
         return upload_id
@@ -239,24 +275,46 @@ class Client:
         assert last_err is not None
         raise last_err
 
-    def _upload_small_file(self, upload_url: str, local_path: Path) -> None:
+    def _upload_small_file(
+        self, upload_url: str, local_path: Path, report: Callable[[int], None] | None = None
+    ) -> None:
         # Pre-authenticated Object Storage URL -- no X-Api-Key here, the
         # URL itself is self-authenticating (same reasoning
         # putRawWithProgress in the frontend documents).
+        size = local_path.stat().st_size
+
         def attempt() -> None:
+            if report is not None:
+                report(0)
             with local_path.open("rb") as f:
-                resp = requests.put(upload_url, data=f)
+                body = _ProgressFile(f, size, report) if report is not None else f
+                resp = requests.put(upload_url, data=body)
             if not resp.ok:
                 raise ForestSensAPIError(resp.status_code, "upload_failed", f"HTTP {resp.status_code}")
 
         self._with_retry(attempt)
+        if report is not None:
+            report(size)
 
-    def _upload_large_file(self, upload_id: str, file_id: str, local_path: Path, size: int) -> None:
+    def _upload_large_file(
+        self,
+        upload_id: str,
+        file_id: str,
+        local_path: Path,
+        size: int,
+        report: Callable[[int], None] | None = None,
+    ) -> None:
         base = f"/v1/uploads/{upload_id}/files/{file_id}/multipart"
         started = self._post(f"{base}/start")
         already_done = {p["part_number"] for p in started["parts"]}
         chunk_size = started["chunk_size_bytes"]
         total_parts = -(-size // chunk_size)  # ceil division
+        # Bytes storage already has (a resumed upload starts there, not at 0).
+        loaded = sum(
+            min(chunk_size, size - (n - 1) * chunk_size) for n in already_done if 1 <= n <= total_parts
+        )
+        if report is not None:
+            report(loaded)
 
         with local_path.open("rb") as f:
             for part_number in range(1, total_parts + 1):
@@ -283,6 +341,9 @@ class Client:
                         )
 
                 self._with_retry(attempt)
+                loaded += length
+                if report is not None:
+                    report(loaded)
 
         self._post(f"{base}/commit")
 
@@ -419,6 +480,7 @@ class Client:
         poll_interval: float = 5.0,
         timeout: float | None = None,
         on_progress: Callable[[Batch], None] | None = None,
+        on_upload_progress: Callable[[str, int, int], None] | None = None,
     ) -> list[str]:
         """Upload -> start a batch -> wait -> download, for the common
         single-input case -- collapses the whole upload/create_batch/
@@ -430,9 +492,12 @@ class Client:
         the batch mid-flight (e.g. cancel it)? Use create_batch/
         wait_for_batch/download_artifacts directly instead -- this is a
         shortcut for the common case, not a replacement for them.
+
+        `on_progress` reports the batch's status changes; `on_upload_progress` reports the upload
+        as `(filename, loaded_bytes, total_bytes)`, see upload_files().
         """
         pipeline_id = pipeline["id"] if isinstance(pipeline, dict) else pipeline
-        upload_id = self.upload_files(paths, name=name)
+        upload_id = self.upload_files(paths, name=name, on_progress=on_upload_progress)
         batch = self.create_batch(pipeline_id, [{"slot": slot, "upload_id": upload_id}])
         batch = self.wait_for_batch(
             batch["id"], poll_interval=poll_interval, timeout=timeout, on_progress=on_progress

@@ -216,6 +216,87 @@ def test_upload_files_large_file_uses_resumable_multipart(tmp_path, monkeypatch)
     assert mock_session_put.call_count == 2
 
 
+def test_upload_files_reports_progress_for_a_small_file(tmp_path):
+    client = make_client()
+    local_file = tmp_path / "flight1.jpg"
+    local_file.write_bytes(b"x" * 1000)
+    created = {
+        "id": "upload-1",
+        "files": [{"id": "file-1", "filename": "flight1.jpg", "upload_url": "https://par.example/flight1.jpg"}],
+    }
+
+    def fake_put(url, data):
+        data.read()  # the real transport reads the body while sending it
+        return MagicMock(ok=True, status_code=200)
+
+    calls = []
+    with patch("requests.Session.request") as mock_request, patch("requests.put", side_effect=fake_put):
+        mock_request.side_effect = [
+            envelope_response(data=created),
+            envelope_response(data={"id": "upload-1", "status": "ready"}),
+        ]
+        client.upload_files([local_file], on_progress=lambda *a: calls.append(a))
+
+    assert calls[0] == ("flight1.jpg", 0, 1000)
+    assert calls[-1] == ("flight1.jpg", 1000, 1000)
+    assert [c[1] for c in calls] == sorted(c[1] for c in calls)
+
+
+def test_upload_files_reports_progress_per_chunk_and_starts_from_what_storage_has(tmp_path, monkeypatch):
+    client = make_client()
+    monkeypatch.setattr("forestsens.client.MULTIPART_CHUNK_SIZE_BYTES", 10)
+    local_file = tmp_path / "big.tif"
+    local_file.write_bytes(b"0123456789" * 3)
+    created = {
+        "id": "upload-1",
+        "files": [{"id": "file-1", "filename": "big.tif", "upload_url": "https://par.example/big.tif"}],
+    }
+    started = {
+        "multipart_upload_id": "mp-1",
+        "chunk_size_bytes": 10,
+        "parts": [{"part_number": 1, "etag": "e1", "size_bytes": 10}],
+    }
+    calls = []
+    with patch("requests.Session.request") as mock_request, patch("requests.Session.put") as mock_put:
+        mock_request.side_effect = [
+            envelope_response(data=created),
+            envelope_response(data=started),
+            envelope_response(data={"id": "upload-1", "status": "ready"}),
+            envelope_response(data={"id": "upload-1", "status": "ready"}),
+        ]
+        mock_put.return_value = envelope_response(data={"part_number": 2, "etag": "e2", "size_bytes": 10})
+        client.upload_files([local_file], on_progress=lambda *a: calls.append(a))
+
+    assert calls == [("big.tif", 10, 30), ("big.tif", 20, 30), ("big.tif", 30, 30)]
+
+
+def test_upload_files_without_a_callback_stays_silent_and_unchanged(tmp_path):
+    client = make_client()
+    local_file = tmp_path / "a.jpg"
+    local_file.write_bytes(b"abc")
+    created = {"id": "u", "files": [{"id": "f", "filename": "a.jpg", "upload_url": "https://par.example/a"}]}
+    with patch("requests.Session.request") as mock_request, patch("requests.put") as mock_put:
+        mock_request.side_effect = [envelope_response(data=created), envelope_response(data={"id": "u"})]
+        mock_put.return_value = MagicMock(ok=True, status_code=200)
+        client.upload_files([local_file])
+    # Without a callback the file object is passed straight to requests, as before.
+    assert not hasattr(mock_put.call_args.kwargs["data"], "_report")
+
+
+def test_run_passes_on_upload_progress_to_the_upload(tmp_path):
+    client = make_client()
+    local_file = tmp_path / "a.jpg"
+    local_file.write_bytes(b"abc")
+    callback = lambda name, loaded, total: None  # noqa: E731
+    with patch.object(client, "upload_files", return_value="upload-1") as mock_upload, patch.object(
+        client, "create_batch", return_value=Batch({"id": "b", "status": "queued"})
+    ), patch.object(client, "wait_for_batch", return_value=Batch({"id": "b", "status": "complete"})), patch.object(
+        client, "download_artifacts", return_value=[]
+    ):
+        client.run("p", local_file, tmp_path / "d", on_upload_progress=callback)
+    mock_upload.assert_called_once_with(local_file, name=None, on_progress=callback)
+
+
 # -- pipelines -------------------------------------------------
 
 
@@ -466,7 +547,7 @@ def test_run_uploads_creates_a_batch_waits_and_downloads_in_one_call(tmp_path):
         paths = client.run("pipeline-1", local_file, dest_dir, on_progress=print)
 
     assert paths == ["downloads/a.tif"]
-    mock_upload.assert_called_once_with(local_file, name=None)
+    mock_upload.assert_called_once_with(local_file, name=None, on_progress=None)
     mock_create.assert_called_once_with("pipeline-1", [{"slot": "input", "upload_id": "upload-1"}])
     mock_wait.assert_called_once_with("batch-1", poll_interval=5.0, timeout=None, on_progress=print)
     mock_download.assert_called_once_with("batch-1", dest_dir)
